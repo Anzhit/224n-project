@@ -46,7 +46,8 @@ def get_glove(glove_path, glove_dim):
 
     print "Loading GLoVE vectors from file: %s" % glove_path
     vocab_size = int(4e5) # this is the vocab size of the corpus we've downloaded
-
+    if glove_path=="../data/fastText.16B.300d.txt":
+        vocab_size = int(1e6)-1
     emb_matrix = np.zeros((vocab_size + len(_START_VOCAB), glove_dim))
     word2id = {}
     id2word = {}
@@ -65,11 +66,14 @@ def get_glove(glove_path, glove_dim):
 
     # go through glove vecs
     with open(glove_path, 'r') as fh:
+        if glove_path=="../data/fastText.16B.300d.txt":
+            fh.readline()
         for line in tqdm(fh, total=vocab_size):
             line = line.lstrip().rstrip().split(" ")
             word = line[0]
             vector = list(map(float, line[1:]))
             if glove_dim != len(vector):
+                print len(vector)
                 raise Exception("You set --glove_path=%s but --embedding_size=%i. If you set --glove_path yourself then make sure that --embedding_size matches!" % (glove_path, glove_dim))
             emb_matrix[idx, :] = vector
             word2id[word] = idx
