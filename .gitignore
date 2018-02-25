@@ -1,0 +1,6 @@
+code/*.pyc
+code/__pycache__/
+code/preprocessing/__pycache__/
+code/preprocessing/*.pyc
+data/
+experiments/
