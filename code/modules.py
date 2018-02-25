@@ -44,9 +44,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_fw = tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_bw = tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks,id=''):
@@ -172,10 +172,11 @@ class ComplexAttn(object):
 	            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
 	            _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
 	            # Use attention distribution to take weighted sum of values
+	            values_t_proj=tf.transpose(values_t_proj,perm=[0,2,1])
 	            if t==0:
-	            	output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
+	            	output = tf.matmul(attn_dist, values_t_proj) # shape (batch_size, num_keys, value_vec_size)
 	            else:
-	            	output=tf.concat([output,tf.matmul(attn_dist, values)],axis=2)
+	            	output=tf.concat([output,tf.matmul(attn_dist, values_t_proj)],axis=2)
             # output1 = tf.matmul(attn_dist, keys) # shape (batch_size, num_keys, value_vec_size)
 
             # Apply dropout
