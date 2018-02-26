@@ -44,9 +44,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size)
+        self.rnn_cell_fw = tf.contrib.rnn.LSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size)
+        self.rnn_cell_bw = tf.contrib.rnn.LSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks,id=''):
@@ -163,10 +163,10 @@ class ComplexAttn(object):
 
             # Calculate attention distribution
             values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            for t in range(4):
-	            Wv_sim=tf.get_variable("Wv_sim"+str(t),shape=[self.key_vec_size/4,self.value_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+            for t in range(8):
+	            Wv_sim=tf.get_variable("Wv_sim"+str(t),shape=[self.key_vec_size/8,self.value_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
 	            values_t_proj=tf.transpose(tf.tensordot(Wv_sim, values_t,axes=((1,),(1,))),perm=[1,0,2]) # shape (batch_size, num_keys, num_values)
-	            Wk_sim=tf.get_variable("Wk_sim"+str(t),shape=[self.value_vec_size/4,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+	            Wk_sim=tf.get_variable("Wk_sim"+str(t),shape=[self.value_vec_size/8,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
 	            keys_proj=tf.transpose(tf.tensordot(Wk_sim,keys,axes=((1,),(2,))),perm=[1,2,0])
 	            attn_logits = tf.matmul(keys_proj, values_t_proj) # shape (batch_size, num_keys, num_values)
 	            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)

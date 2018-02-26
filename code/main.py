@@ -44,7 +44,7 @@ tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experime
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
 
 # Hyperparameters
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.0008, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 100, "Batch size to use")
@@ -149,8 +149,8 @@ def main(unused_argv):
         logging.getLogger().addHandler(file_handler)
 
         # Save a record of flags as a .json file in train_dir
-        with open(os.path.join(FLAGS.train_dir, "flags.json"), 'w') as fout:
-            json.dump(FLAGS.__flags, fout)
+        # with open(os.path.join(FLAGS.train_dir, "flags.json"), 'w') as fout:
+            # json.dump(FLAGS.__flags, fout)
 
         # Make bestmodel dir if necessary
         if not os.path.exists(bestmodel_dir):
