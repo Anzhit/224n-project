@@ -142,6 +142,7 @@ class QAModel(object):
         blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
         attn_layer=DotProductAttn(self.keep_prob, self.FLAGS.hidden_size*4, self.FLAGS.hidden_size*4)
         _,attn_output=attn_layer.build_graph(blended_reps,blended_reps,blended_reps,self.context_mask)
+        blended_reps = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
         blended_reps=tf.contrib.layers.layer_norm(blended_reps+attn_output)
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
