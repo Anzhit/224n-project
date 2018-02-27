@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn
+from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -136,11 +136,13 @@ class QAModel(object):
 
         # Use context hidden states to attend to question hidden states
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         # Concat attn_output to context_hiddens to get blended_reps
         blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
-
+        attn_layer=DotProductAttn(self.keep_prob, self.FLAGS.hidden_size*4, self.FLAGS.hidden_size*4)
+        _,attn_output=attn_layer.build_graph(blended_reps,blended_reps,blended_reps,self.context_mask)
+        blended_reps=tf.contrib.layers.layer_norm(blended_reps+attn_output)
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
