@@ -168,7 +168,7 @@ class ComplexAttn(object):
 	            values_t_proj=tf.transpose(tf.tensordot(Wv_sim, values_t,axes=((1,),(1,))),perm=[1,0,2]) # shape (batch_size, num_keys, num_values)
 	            Wk_sim=tf.get_variable("Wk_sim"+str(t),shape=[self.value_vec_size/4,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
 	            keys_proj=tf.transpose(tf.tensordot(Wk_sim,keys,axes=((1,),(2,))),perm=[1,2,0])
-	            attn_logits = tf.matmul(keys_proj, values_t_proj) # shape (batch_size, num_keys, num_values)
+	            attn_logits = tf.matmul(keys_proj, values_t_proj)/tf.sqrt(tf.to_float(self.key_vec_size/4)) # shape (batch_size, num_keys, num_values)
 	            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
 	            _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
 	            # Use attention distribution to take weighted sum of values
@@ -290,13 +290,22 @@ class DotProductAttn(object):
         with vs.variable_scope("DotProductAttn"):
 
             # Calculate attention distribution
-            keys_t = tf.transpose(keys, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            attn_logits = tf.matmul(queries, keys_t)/tf.sqrt(tf.to_float(queries.shape[2])) # shape (batch_size, num_keys, num_values)
-            attn_logits_mask = tf.expand_dims(mask, 1)
-            _,attn_dist=masked_softmax(attn_logits, attn_logits_mask, 2)
-            # Use attention distribution to take weighted sum of values
-            output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
-
+            for t in range(4):
+                Wq=tf.get_variable("Wq"+str(t),shape=[self.key_vec_size/4,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+                Wk=tf.get_variable("Wk"+str(t),shape=[self.key_vec_size/4,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+                Wv=tf.get_variable("Wv"+str(t),shape=[self.value_vec_size/4,self.value_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+                keys_proj=tf.transpose(tf.tensordot(Wk,keys,axes=((1,),(2,))),perm=[1,2,0])
+                queries_proj=tf.transpose(tf.tensordot(Wq,queries,axes=((1,),(2,))),perm=[1,2,0])
+                values_proj=tf.transpose(tf.tensordot(Wv,values,axes=((1,),(2,))),perm=[1,2,0])
+                keys_t = tf.transpose(keys_proj, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
+                attn_logits = tf.matmul(queries_proj, keys_t)/tf.sqrt(tf.to_float(queries_proj.shape[2])) # shape (batch_size, num_keys, num_values)
+                attn_logits_mask = tf.expand_dims(mask, 1)
+                _,attn_dist=masked_softmax(attn_logits, attn_logits_mask, 2)
+	            # Use attention distribution to take weighted sum of values
+               	if t==0:
+                    output = tf.matmul(attn_dist, values_proj) # shape (batch_size, num_keys, value_vec_size)
+                else:
+                    output=tf.concat([output,tf.matmul(attn_dist, values_proj)],axis=2)
             # Apply dropout
             output = tf.nn.dropout(output, self.keep_prob)
 
