@@ -135,18 +135,23 @@ class QAModel(object):
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
         # Use context hidden states to attend to question hidden states
-        attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
-        blended_reps = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
-        blended_reps=tf.contrib.layers.layer_norm(blended_reps+context_hiddens)
-        # Concat attn_output to context_hiddens to get blended_reps
         attn_layer=DotProductAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _,attn_output=attn_layer.build_graph(blended_reps,blended_reps,blended_reps,self.context_mask)
-        blended_reps = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
-        blended_reps=tf.contrib.layers.layer_norm(blended_reps+attn_output+context_hiddens)
+        _,attn_output=attn_layer.build_graph(context_hiddens,context_hiddens,context_hiddens,self.context_mask)
+        attn_output = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        context_hiddens=tf.contrib.layers.layer_norm(context_hiddens+attn_output)
+
+        attn_layer=DotProductAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _,attn_output=attn_layer.build_graph(question_hiddens,question_hiddens,question_hiddens,self.qn_mask)
+        attn_output = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        question_hiddens=tf.contrib.layers.layer_norm(question_hiddens+attn_output)
 
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, blended_reps,"q2cAttention1")
+        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
+        # blended_reps = tf.contrib.layers.fully_connected(attn_output, num_outputs=self.FLAGS.hidden_size*2,activation_fn=None) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        # blended_reps=tf.contrib.layers.layer_norm(blended_reps+context_hiddens)
+        blended_reps=tf.concat([context_hiddens,attn_output],axis=2)
+        # Concat attn_output to context_hiddens to get blended_reps
+        
         # blended_reps = tf.concat([context_hiddens, blended_reps], axis=2) # (batch_size, context_len, hidden_size*4)
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
