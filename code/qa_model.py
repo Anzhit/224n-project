@@ -140,14 +140,14 @@ class QAModel(object):
         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(blended_reps, self.context_mask,id='2') # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(question_hiddens, self.qn_mask,id='2') # (batch_size, question_len, hidden_size*2)
+        context_hiddens = encoder.build_graph(context_hiddens, self.context_mask,id='2') # (batch_size, context_len, hidden_size*2)
+        question_hiddens = encoder.build_graph(blended_reps, self.qn_mask,id='2') # (batch_size, question_len, hidden_size*2)
 
         # Use context hidden states to attend to question hidden states
 
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention1") # attn_output is shape (batch_size, context_len, hidden_size*2)
-        # blended_reps=tf.concat([context_hiddens,blended_reps],axis=2)
+        blended_reps=tf.concat([context_hiddens,blended_reps],axis=2)
 
         # Concat attn_output to context_hiddens to get blended_reps
         
