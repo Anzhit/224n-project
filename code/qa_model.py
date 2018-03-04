@@ -131,23 +131,24 @@ class QAModel(object):
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
         encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
+        context_hiddens_orig = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
         # Use context hidden states to attend to question hidden states
-
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
+        _, context_hiddens = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
+        attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _, question_hiddens = attn_layer.build_graph(context_hiddens, self.context_mask, question_hiddens,"c2qAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
         context_hiddens = encoder.build_graph(context_hiddens, self.context_mask,id='2') # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(blended_reps, self.qn_mask,id='2') # (batch_size, question_len, hidden_size*2)
+        question_hiddens = encoder.build_graph(question_hiddens, self.qn_mask,id='2') # (batch_size, question_len, hidden_size*2)
 
         # Use context hidden states to attend to question hidden states
 
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,"q2cAttention1") # attn_output is shape (batch_size, context_len, hidden_size*2)
-        blended_reps=tf.concat([context_hiddens,blended_reps],axis=2)
+        blended_reps=tf.concat([context_hiddens_orig,blended_reps],axis=2)
 
         # Concat attn_output to context_hiddens to get blended_reps
         
@@ -155,7 +156,7 @@ class QAModel(object):
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        out_rnn=RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+        out_rnn=RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob)
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='1')
         blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
