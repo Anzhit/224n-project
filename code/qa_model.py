@@ -133,7 +133,10 @@ class QAModel(object):
         encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
         context_hiddens_orig = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
-
+        # FIlter Layer
+        r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
+        tf.transpose(tf.nn.l2_normalize(question_hiddens,2),perm=[0,2,1])),axis=2,keep_dims=True)
+        context_hiddens_orig=context_hiddens_orig/r
         # Use context hidden states to attend to question hidden states
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, context_hiddens = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
