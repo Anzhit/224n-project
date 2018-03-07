@@ -66,6 +66,8 @@ class QAModel(object):
         self.gradient_norm = tf.global_norm(gradients)
         clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
         self.param_norm = tf.global_norm(params)
+        
+        self.loss += self.param_norm * 0.03
 
         # Define optimizer and updates
         # (updates is what you need to fetch in session.run to do a gradient update)
