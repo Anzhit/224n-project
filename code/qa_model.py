@@ -134,16 +134,16 @@ class QAModel(object):
         context_hiddens_orig = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
         # FIlter Layer
-        r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
-        tf.transpose(tf.nn.l2_normalize(question_hiddens,2),perm=[0,2,1])),axis=2,keep_dims=True)
-        context_hiddens_orig=context_hiddens_orig/r
+       # r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
+       # tf.transpose(tf.nn.l2_normalize(question_hiddens,2),perm=[0,2,1])),axis=2,keepdims=True)
+       # context_hiddens_orig=context_hiddens_orig*r
         # Use context hidden states to attend to question hidden states
         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         # Concat attn_output to context_hiddens to get blended_reps
         
-        blended_reps = tf.concat([context_hiddens, blended_reps], axis=2) # (batch_size, context_len, hidden_size*4)
+        blended_reps = tf.concat([context_hiddens_orig, blended_reps], axis=2) # (batch_size, context_len, hidden_size*4)
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
