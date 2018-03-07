@@ -45,9 +45,9 @@ class RNNEncoder(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_layers = num_layers
-        self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
+        self.rnn_cell_fw = [tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size, dropout_keep_prob=keep_prob, name='lstmf'+str(i)) for i in range(num_layers)]
         self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
-        self.rnn_cell_bw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmb'+str(i)) for i in range(num_layers)]
+        self.rnn_cell_bw = [tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size, dropout_keep_prob=keep_prob, name='lstmb'+str(i)) for i in range(num_layers)]
         self.rnn_cell_bw = [DropoutWrapper(self.rnn_cell_bw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
 
     def build_graph(self, inputs, masks,id=''):
