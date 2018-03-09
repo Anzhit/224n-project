@@ -132,9 +132,12 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-        context_hiddens_orig = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        if self.FLAGS.cudnn_lstm: 
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+        else:
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, 'l1') # (batch_size, context_len, hidden_size*2)
+        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask, 'l1') # (batch_size, question_len, hidden_size*2)
         
         # FIlter Layer
        # r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
@@ -152,10 +155,14 @@ class QAModel(object):
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         
         attn_layer = Bidaf(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, _, blended_reps = attn_layer.build_graph(context_hiddens_orig, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
+        _, _, blended_reps = attn_layer.build_graph(context_hiddens, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
         
-        out_rnn=RNNEncoder(self.FLAGS.hidden_size*8, self.keep_prob, self.FLAGS.num_layers)
-        blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='1')
+        if self.FLAGS.cudnn_lstm: 
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size*8, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+        else:
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size*8, self.keep_prob, self.FLAGS.num_layers)
+        
+        blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1')
         blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
@@ -167,7 +174,10 @@ class QAModel(object):
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
-            end_rnn = RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob, self.FLAGS.num_layers)
+            if self.FLAGS.cudnn_lstm: 
+                end_rnn = RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+            else:
+                end_rnn = RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob, self.FLAGS.num_layers)
             output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
             
             softmax_layer_end = SimpleSoftmaxLayer()

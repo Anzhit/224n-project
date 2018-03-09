@@ -68,6 +68,9 @@ tf.app.flags.DEFINE_string("ckpt_load_dir", "", "For official_eval mode, which d
 tf.app.flags.DEFINE_string("json_in_path", "", "For official_eval mode, path to JSON input file. You need to specify this for official_eval_mode.")
 tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for official_eval mode. Defaults to predictions.json")
 
+# Misc
+tf.app.flags.DEFINE_boolean("cudnn_lstm", False, "Whether to use cudnn_lstm")
+
 
 FLAGS = tf.app.flags.FLAGS
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)

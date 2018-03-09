@@ -19,7 +19,6 @@ from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
 
-
 class RNNEncoder(object):
     """
     General-purpose module to encode a sequence using a RNN.
@@ -36,21 +35,32 @@ class RNNEncoder(object):
     This code uses a bidirectional GRU, but you could experiment with other types of RNN.
     """
 
-    def __init__(self, hidden_size, keep_prob, num_layers):
+    def __init__(self, hidden_size, keep_prob, num_layers, use_cudnn_lstm=False, batch_size=None):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
           keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
         """
+        self.use_cudnn_lstm = use_cudnn_lstm
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_layers = num_layers
-        self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
-        self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
-        self.rnn_cell_bw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmb'+str(i)) for i in range(num_layers)]
-        self.rnn_cell_bw = [DropoutWrapper(self.rnn_cell_bw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
+        
+        if self.use_cudnn_lstm:
+            print('Using cudnn lstm')
+            self.direction = 'bidirectional'
+            
+            self.cudnn_cell = tf.contrib.cudnn_rnn.CudnnLSTM(self.num_layers, self.hidden_size, self.hidden_size,
+                                                          direction=self.direction,
+                                                          input_mode='linear_input',
+                                                          dropout=0.2) # if is_training else 0)
+        else:
+            self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
+            self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
+            self.rnn_cell_bw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmb'+str(i)) for i in range(num_layers)]
+            self.rnn_cell_bw = [DropoutWrapper(self.rnn_cell_bw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
 
-    def build_graph(self, inputs, masks,id=''):
+    def build_graph(self, inputs, masks, id=''):
         """
         Inputs:
           inputs: Tensor shape (batch_size, seq_len, input_size)
@@ -63,22 +73,32 @@ class RNNEncoder(object):
             This is all hidden states (fw and bw hidden states are concatenated).
         """
         with vs.variable_scope("RNNEncoder"+id):
-            input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
-            out = inputs
-            
-            for i in range(self.num_layers):
-                # Note: fw_out and bw_out are the hidden states for every timestep.
-                # Each is shape (batch_size, seq_len, hidden_size).
-                (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw[i], self.rnn_cell_bw[i], out, input_lens, dtype=tf.float32)
+            if self.use_cudnn_lstm:
+                is_training = True
+                inputs = tf.transpose(inputs, [1, 0, 2])
+                params_size_t = self.cudnn_cell.count_params()
+                self.rnn_params = tf.get_variable("lstm_params", initializer=tf.random_uniform([params_size_t], -0.1, 0.1), validate_shape=False)
+                self.c = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
+                self.h = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
+                outputs, self.h, self.c = self.cudnn_cell(input_data=inputs, input_h=self.h, input_c=self.c, params=self.rnn_params, is_training=is_training)
+                in_text_repres = tf.transpose(outputs, [1, 0, 2])
+                in_text_repres = tf.nn.dropout(in_text_repres, self.keep_prob)
+                return in_text_repres
+            else: 
+                input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
+                out = inputs
 
-                # Concatenate the forward and backward hidden states
-                out = tf.concat([fw_out, bw_out], 2)
+                for i in range(self.num_layers):
+                    # Note: fw_out and bw_out are the hidden states for every timestep.
+                    # Each is shape (batch_size, seq_len, hidden_size).
+                    (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw[i], self.rnn_cell_bw[i], out, input_lens, dtype=tf.float32)
 
-                # Apply dropout
-                out = tf.nn.dropout(out, self.keep_prob)
+                    # Concatenate the forward and backward hidden states
+                    out = tf.concat([fw_out, bw_out], 2)
 
-            return out
-
+                    # Apply dropout
+                    out = tf.nn.dropout(out, self.keep_prob)
+                return out
 
 class SimpleSoftmaxLayer(object):
     """
