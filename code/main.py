@@ -99,7 +99,7 @@ def initialize_model(session, model, train_dir, expect_exists):
         else:
             print "There is no saved checkpoint at %s. Creating model with fresh parameters." % train_dir
             session.run(tf.global_variables_initializer())
-            print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
+#            print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
 
 
 def main(unused_argv):
