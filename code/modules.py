@@ -45,9 +45,9 @@ class RNNEncoder(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_layers = num_layers
-        self.rnn_cell_fw = [tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size, dropout_keep_prob=keep_prob, name='lstmf'+str(i)) for i in range(num_layers)]
+        self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
         self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
-        self.rnn_cell_bw = [tf.contrib.rnn.LayerNormBasicLSTMCell(self.hidden_size, dropout_keep_prob=keep_prob, name='lstmb'+str(i)) for i in range(num_layers)]
+        self.rnn_cell_bw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmb'+str(i)) for i in range(num_layers)]
         self.rnn_cell_bw = [DropoutWrapper(self.rnn_cell_bw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
 
     def build_graph(self, inputs, masks,id=''):
@@ -117,7 +117,64 @@ class SimpleSoftmaxLayer(object):
 
             return masked_logits, prob_dist
 
+        
+class Bidaf(object):
+    def __init__(self, keep_prob, context_vec_size, qn_vec_size):
+        self.keep_prob = keep_prob
+        self.context_vec_size = context_vec_size
+        self.qn_vec_size = qn_vec_size
 
+    def build_graph(self, context, context_mask, qns, qns_mask, scope):
+        with vs.variable_scope(scope):
+
+            # context:  (batch_size, context_len, hidden_size*2)
+            # qns    :  (batch_size, question_len, hidden_size*2)
+            
+            assert self.context_vec_size == self.qn_vec_size
+            ws1 = tf.get_variable("ws1",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            ws2 = tf.get_variable("ws2",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            ws3 = tf.get_variable("ws3",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            
+            wh = tf.tensordot(context, ws1, [[2], [0]])   # (batch_size, context_len)
+            wq = tf.tensordot(qns, ws2, [[2], [0]])       # (batch_size, question_len)
+            woh = tf.multiply(context, ws3)               # (batch_size, context_len, hidden_size*2)
+            qnsT = tf.transpose(qns, perm=[0, 2, 1])      # (batch_size, hidden_size*2, question_len)
+            whoq = tf.matmul(woh, qnsT)                   # (batch_size, context_len, question_len)
+                               
+            S = tf.expand_dims(wh, 2) + tf.expand_dims(wq, 1) + whoq  # (batch_size, context_len, question_len)
+            
+            #c2q
+            attn_mask_qs = tf.expand_dims(qns_mask, 1)         # (batch_size, 1, question_len)
+            _, attn_dist = masked_softmax(S, attn_mask_qs, 2)  # (batch_size, context_len, question_len)
+            Ut = tf.matmul(attn_dist, qns)                     # (batch_size, context_len, hidden_size*2)
+            Ut = tf.transpose(Ut, perm=[0, 2, 1])              # (batch_size, hidden_size*2, context_len)
+                              
+            #q2c
+            Smaxcol = tf.reduce_max(S, axis=2)                 # (batch_size, context_len)
+#             attn_mask_co = tf.expand_dims(context_mask, 2)       # (batch_size, context_len, 1)
+            _, b = masked_softmax(Smaxcol, context_mask, 1)    # (batch_size, context_len)
+            b = tf.expand_dims(b, axis=1)                      # (batch_size, 1, context_len)
+            ht = tf.matmul(b, context)                         # (batch_size, 1, hidden_size*2)
+            ht = tf.squeeze(ht)                                # (batch_size, hidden_size*2)
+            
+            batch_size = tf.shape(ht)[0]
+            dim1_size  = tf.shape(ht)[1]
+            dim2_size  = tf.shape(Ut)[2]
+            ht = tf.reshape(ht, (-1,))
+            Ht = tf.reshape(tf.tile(ht, [dim2_size]), (batch_size, dim1_size, dim2_size))
+                              # (batch_size, hidden_size*2, context_len)
+                              
+            H = tf.transpose(context, perm=[0, 2, 1])          # (batch_size, hidden_size*2, context_len)
+            HoUt = tf.multiply(H, Ut)
+            HoHt = tf.multiply(H, Ht)
+                              
+            # output
+            G = tf.concat([H, Ut, HoUt, HoHt], axis=1)         # (batch_size, hidden_size*8, context_len)
+            output = tf.transpose(G, perm=[0,2,1])
+            output = tf.nn.dropout(output, self.keep_prob)
+                              
+            return attn_dist, b, output
+                              
 class ComplexAttn(object):
     """Module for basic attention.
 
