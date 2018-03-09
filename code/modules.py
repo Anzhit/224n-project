@@ -18,7 +18,7 @@ import tensorflow as tf
 from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
-
+from tensorflow.contrib.cudnn_rnn.python.layers import cudnn_rnn
 class RNNEncoder(object):
     """
     General-purpose module to encode a sequence using a RNN.
@@ -35,7 +35,7 @@ class RNNEncoder(object):
     This code uses a bidirectional GRU, but you could experiment with other types of RNN.
     """
 
-    def __init__(self, hidden_size, keep_prob, num_layers, use_cudnn_lstm=False, batch_size=None):
+    def __init__(self, hidden_size, keep_prob, num_layers, use_cudnn_lstm=False, batch_size=None,cudnn_dropout=None):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
@@ -45,22 +45,20 @@ class RNNEncoder(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_layers = num_layers
-        
+        self.cudnn_dropout=cudnn_dropout
         if self.use_cudnn_lstm:
             print('Using cudnn lstm')
             self.direction = 'bidirectional'
             
-            self.cudnn_cell = tf.contrib.cudnn_rnn.CudnnLSTM(self.num_layers, self.hidden_size, self.hidden_size,
-                                                          direction=self.direction,
-                                                          input_mode='linear_input',
-                                                          dropout=0.2) # if is_training else 0)
+            self.cudnn_cell = cudnn_rnn.CudnnLSTM(self.num_layers, self.hidden_size,
+                                                          direction=self.direction)
         else:
             self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
             self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
             self.rnn_cell_bw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmb'+str(i)) for i in range(num_layers)]
             self.rnn_cell_bw = [DropoutWrapper(self.rnn_cell_bw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
 
-    def build_graph(self, inputs, masks, id=''):
+    def build_graph(self, inputs, masks, id='',is_training=None):
         """
         Inputs:
           inputs: Tensor shape (batch_size, seq_len, input_size)
@@ -74,13 +72,12 @@ class RNNEncoder(object):
         """
         with vs.variable_scope("RNNEncoder"+id):
             if self.use_cudnn_lstm:
-                is_training = True
                 inputs = tf.transpose(inputs, [1, 0, 2])
-                params_size_t = self.cudnn_cell.count_params()
-                self.rnn_params = tf.get_variable("lstm_params", initializer=tf.random_uniform([params_size_t], -0.1, 0.1), validate_shape=False)
-                self.c = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
-                self.h = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
-                outputs, self.h, self.c = self.cudnn_cell(input_data=inputs, input_h=self.h, input_c=self.c, params=self.rnn_params, is_training=is_training)
+                # params_size_t = self.cudnn_cell.count_params()
+                # self.rnn_params = tf.get_variable("lstm_params", initializer=tf.random_uniform([params_size_t], -0.1, 0.1), validate_shape=False)
+                # self.c = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
+                # self.h = tf.zeros([self.num_layers, options.batch_size, self.hidden_size], tf.float32)
+                outputs,_ = self.cudnn_cell(inputs,training= is_training)
                 in_text_repres = tf.transpose(outputs, [1, 0, 2])
                 in_text_repres = tf.nn.dropout(in_text_repres, self.keep_prob)
                 return in_text_repres
@@ -194,7 +191,71 @@ class Bidaf(object):
             output = tf.nn.dropout(output, self.keep_prob)
                               
             return attn_dist, b, output
+class Bidaf2(object):
+    def __init__(self, keep_prob, context_vec_size, qn_vec_size):
+        self.keep_prob = keep_prob
+        self.context_vec_size = context_vec_size
+        self.qn_vec_size = qn_vec_size
+
+    def build_graph(self, context, context_mask, qns, qns_mask, scope):
+        with vs.variable_scope(scope):
+
+            # context:  (batch_size, context_len, hidden_size*2)
+            # qns    :  (batch_size, question_len, hidden_size*2)
+            for t in range(4):
+                Wq=tf.get_variable("Wq"+str(t),shape=[self.qn_vec_size/4,self.qn_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+                Wc=tf.get_variable("Wc"+str(t),shape=[self.context_vec_size/4,self.context_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
+                qns_proj=tf.transpose(tf.tensordot(Wq,qns,axes=((1,),(2,))),perm=[1,2,0])
+                context_proj=tf.transpose(tf.tensordot(Wq,context,axes=((1,),(2,))),perm=[1,2,0])            
+                # assert self.context_vec_size == self.qn_vec_size
+                # ws1 = tf.get_variable("ws1",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                # ws2 = tf.get_variable("ws2",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                # ws3 = tf.get_variable("ws3",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                
+                # wh = tf.tensordot(context, ws1, [[2], [0]])   # (batch_size, context_len)
+                # wq = tf.tensordot(qns, ws2, [[2], [0]])       # (batch_size, question_len)
+                # woh = tf.multiply(context, ws3)               # (batch_size, context_len, hidden_size*2)
+                # qnsT = tf.transpose(qns, perm=[0, 2, 1])      # (batch_size, hidden_size*2, question_len)
+                # whoq = tf.matmul(woh, qnsT)                   # (batch_size, context_len, question_len)
+                                   
+                # S = tf.expand_dims(wh, 2) + tf.expand_dims(wq, 1) + whoq  # (batch_size, context_len, question_len)
+                qns_t = tf.transpose(qns_proj, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
+                S = tf.matmul(context_proj, qns_t)               
+                #c2q
+                attn_mask_qs = tf.expand_dims(qns_mask, 1)         # (batch_size, 1, question_len)
+                _, attn_dist = masked_softmax(S, attn_mask_qs, 2)  # (batch_size, context_len, question_len)
+                Ut = tf.matmul(attn_dist, qns)                     # (batch_size, context_len, hidden_size*2)
+                Ut = tf.transpose(Ut, perm=[0, 2, 1])              # (batch_size, hidden_size*2, context_len)
+                                  
+                #q2c
+                Smaxcol = tf.reduce_max(S, axis=2)                 # (batch_size, context_len)
+    #             attn_mask_co = tf.expand_dims(context_mask, 2)       # (batch_size, context_len, 1)
+                _, b = masked_softmax(Smaxcol, context_mask, 1)    # (batch_size, context_len)
+                b = tf.expand_dims(b, axis=1)                      # (batch_size, 1, context_len)
+                ht = tf.matmul(b, context)                         # (batch_size, 1, hidden_size*2)
+                ht = tf.squeeze(ht)                                # (batch_size, hidden_size*2)
+                
+                batch_size = tf.shape(ht)[0]
+                dim1_size  = tf.shape(ht)[1]
+                dim2_size  = tf.shape(Ut)[2]
+                ht = tf.reshape(ht, (-1,))
+                Ht = tf.reshape(tf.tile(ht, [dim2_size]), (batch_size, dim1_size, dim2_size))
+                                  # (batch_size, hidden_size*2, context_len)
+                                  
+                H = tf.transpose(context, perm=[0, 2, 1])          # (batch_size, hidden_size*2, context_len)
+                # HoUt = tf.multiply(H, Ut)
+                HoHt = tf.multiply(H, Ht)
+                                  
+                # output
+                G = tf.concat([H, Ut, HoHt], axis=1)         # (batch_size, hidden_size*6, context_len)
+                G = tf.transpose(G, perm=[0,2,1])
+                if t==0:
+                    output = G 
+                else:
+                    output=tf.concat([output,G],axis=2)
+            output = tf.nn.dropout(output, self.keep_prob)
                               
+            return attn_dist, b, output                              
 class ComplexAttn(object):
     """Module for basic attention.
 
@@ -248,7 +309,7 @@ class ComplexAttn(object):
 	            values_t_proj=tf.transpose(tf.tensordot(Wv_sim, values_t,axes=((1,),(1,))),perm=[1,0,2]) # shape (batch_size, num_keys, num_values)
 	            Wk_sim=tf.get_variable("Wk_sim"+str(t),shape=[self.value_vec_size/4,self.key_vec_size],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer())
 	            keys_proj=tf.transpose(tf.tensordot(Wk_sim,keys,axes=((1,),(2,))),perm=[1,2,0])
-	            attn_logits = tf.matmul(keys_proj, values_t_proj)/tf.sqrt(tf.to_float(self.key_vec_size/4)) # shape (batch_size, num_keys, num_values)
+	            attn_logits = tf.matmul(keys_proj, values_t_proj) # shape (batch_size, num_keys, num_values)
 	            attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
 	            _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
 	            # Use attention distribution to take weighted sum of values

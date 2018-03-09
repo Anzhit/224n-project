@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, BasicAttn, Bidaf
+from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, BasicAttn,Bidaf, Bidaf2
 
 logging.basicConfig(level=logging.INFO)
 
@@ -154,15 +154,15 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         
-        attn_layer = Bidaf(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        attn_layer = Bidaf2(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, _, blended_reps = attn_layer.build_graph(context_hiddens, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
         
         if self.FLAGS.cudnn_lstm: 
-            out_rnn = RNNEncoder(self.FLAGS.hidden_size*8, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
-            out_rnn = RNNEncoder(self.FLAGS.hidden_size*8, self.keep_prob, self.FLAGS.num_layers)
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         
-        blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1')
+        blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
         blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
@@ -175,9 +175,9 @@ class QAModel(object):
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
             if self.FLAGS.cudnn_lstm: 
-                end_rnn = RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
             else:
-                end_rnn = RNNEncoder(self.FLAGS.hidden_size/4, self.keep_prob, self.FLAGS.num_layers)
+                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
             output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
             
             softmax_layer_end = SimpleSoftmaxLayer()
@@ -243,7 +243,7 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
-
+        self.FLAGS.mode='train'
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
@@ -275,7 +275,7 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
-
+        self.FLAGS.mode='test'
         output_feed = [self.loss]
 
         [loss] = session.run(output_feed, input_feed)
@@ -300,7 +300,7 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
-
+        self.FLAGS.mode='test'
         output_feed = [self.probdist_start, self.probdist_end]
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
         return probdist_start, probdist_end
