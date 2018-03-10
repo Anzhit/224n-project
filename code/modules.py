@@ -51,7 +51,7 @@ class RNNEncoder(object):
             self.direction = 'bidirectional'
             
             self.cudnn_cell = cudnn_rnn.CudnnLSTM(self.num_layers, self.hidden_size,
-                                                          direction=self.direction)
+                                                          direction=self.direction,dropout=cudnn_dropout)
         else:
             self.rnn_cell_fw = [tf.contrib.rnn.LSTMCell(self.hidden_size, name='lstmf'+str(i)) for i in range(num_layers)]
             self.rnn_cell_fw = [DropoutWrapper(self.rnn_cell_fw[i], input_keep_prob=self.keep_prob) for i in range(num_layers)]
@@ -208,19 +208,19 @@ class Bidaf2(object):
                 qns_proj=tf.transpose(tf.tensordot(Wq,qns,axes=((1,),(2,))),perm=[1,2,0])
                 context_proj=tf.transpose(tf.tensordot(Wq,context,axes=((1,),(2,))),perm=[1,2,0])            
                 # assert self.context_vec_size == self.qn_vec_size
-                # ws1 = tf.get_variable("ws1",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
-                # ws2 = tf.get_variable("ws2",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
-                # ws3 = tf.get_variable("ws3",shape=[self.qn_vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                ws1 = tf.get_variable("ws1"+str(t),shape=[self.qn_vec_size/4,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                ws2 = tf.get_variable("ws2"+str(t),shape=[self.qn_vec_size/4,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                ws3 = tf.get_variable("ws3"+str(t),shape=[self.qn_vec_size/4,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
                 
-                # wh = tf.tensordot(context, ws1, [[2], [0]])   # (batch_size, context_len)
-                # wq = tf.tensordot(qns, ws2, [[2], [0]])       # (batch_size, question_len)
-                # woh = tf.multiply(context, ws3)               # (batch_size, context_len, hidden_size*2)
-                # qnsT = tf.transpose(qns, perm=[0, 2, 1])      # (batch_size, hidden_size*2, question_len)
-                # whoq = tf.matmul(woh, qnsT)                   # (batch_size, context_len, question_len)
+                wh = tf.tensordot(context_proj, ws1, [[2], [0]])   # (batch_size, context_len)
+                wq = tf.tensordot(qns_proj, ws2, [[2], [0]])       # (batch_size, question_len)
+                woh = tf.multiply(context_proj, ws3)               # (batch_size, context_len, hidden_size*2)
+                qnsT = tf.transpose(qns_proj, perm=[0, 2, 1])      # (batch_size, hidden_size*2, question_len)
+                whoq = tf.matmul(woh, qnsT)                   # (batch_size, context_len, question_len)
                                    
-                # S = tf.expand_dims(wh, 2) + tf.expand_dims(wq, 1) + whoq  # (batch_size, context_len, question_len)
-                qns_t = tf.transpose(qns_proj, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-                S = tf.matmul(context_proj, qns_t)               
+                S = tf.expand_dims(wh, 2) + tf.expand_dims(wq, 1) + whoq  # (batch_size, context_len, question_len)
+                #qns_t = tf.transpose(qns_proj, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
+                #S = tf.matmul(context_proj, qns_t)               
                 #c2q
                 attn_mask_qs = tf.expand_dims(qns_mask, 1)         # (batch_size, 1, question_len)
                 _, attn_dist = masked_softmax(S, attn_mask_qs, 2)  # (batch_size, context_len, question_len)
@@ -243,11 +243,11 @@ class Bidaf2(object):
                                   # (batch_size, hidden_size*2, context_len)
                                   
                 H = tf.transpose(context, perm=[0, 2, 1])          # (batch_size, hidden_size*2, context_len)
-                # HoUt = tf.multiply(H, Ut)
+                HoUt = tf.multiply(H, Ut)
                 HoHt = tf.multiply(H, Ht)
                                   
                 # output
-                G = tf.concat([H, Ut, HoHt], axis=1)         # (batch_size, hidden_size*6, context_len)
+                G = tf.concat([H, Ut,HoUt, HoHt], axis=1)         # (batch_size, hidden_size*6, context_len)
                 G = tf.transpose(G, perm=[0,2,1])
                 if t==0:
                     output = G 
