@@ -163,6 +163,15 @@ class QAModel(object):
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
+
+        attn_layer = DotProductAttn(self.keep_prob,self.FLAGS.hidden_size*2,self.FLAGS.hidden_size*2)
+        _,attn_output=attn_layer.build_graph(blended_reps,blended_reps,blended_reps,self.context_mask)
+        blended_reps=tf.concat([blended_reps,attn_output],axis=2)
+        if self.FLAGS.cudnn_lstm: 
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+        else:
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+        blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.2',is_training=self.FLAGS.mode=='train')
         blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
