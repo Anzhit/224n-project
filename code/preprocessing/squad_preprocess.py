@@ -50,7 +50,7 @@ def data_from_json(filename):
 
 
 def tokenize(sequence):
-    tokens = [token.replace("``", '"').replace("''", '"').lower() for token in nltk.word_tokenize(sequence)]
+    tokens = [token.replace("``", '"').replace("''", '"') for token in nltk.word_tokenize(sequence)]
     return tokens
 
 
@@ -182,7 +182,7 @@ def preprocess_and_write(dataset, tier, out_dir):
             context = context.replace("``", '" ')
 
             context_tokens = tokenize(context) # list of strings (lowercase)
-            context = context.lower()
+            context = context
 
             qas = article_paragraphs[pid]['qas'] # list of questions
 
@@ -200,7 +200,7 @@ def preprocess_and_write(dataset, tier, out_dir):
                 question_tokens = tokenize(question) # list of strings
 
                 # of the three answers, just take the first
-                ans_text = unicode(qn['answers'][0]['text']).lower() # get the answer text
+                ans_text = unicode(qn['answers'][0]['text']) # get the answer text
                 ans_start_charloc = qn['answers'][0]['answer_start'] # answer start loc (character count)
                 ans_end_charloc = ans_start_charloc + len(ans_text) # answer end loc (character count) (exclusive)
 
