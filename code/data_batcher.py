@@ -76,7 +76,7 @@ def sentence_to_token_ids(sentence, word2id):
     Note any token that isn't in the word2id mapping gets mapped to the id for UNK
     """
     tokens = split_by_whitespace(sentence) # list of strings
-    ids = [word2id.get(w, UNK_ID) for w in tokens]
+    ids = [word2id.get(w, word2id.get(w.lower(),UNK_ID)) for w in tokens]
     return tokens, ids
 
 

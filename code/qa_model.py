@@ -59,21 +59,21 @@ class QAModel(object):
             self.add_embedding_layer(emb_matrix)
             self.build_graph()
             self.add_loss()
-
+        if self.FLAGS.mode=='train':
         # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
-        params = tf.trainable_variables()
-        gradients = tf.gradients(self.loss, params)
-        self.gradient_norm = tf.global_norm(gradients)
-        clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
-        self.param_norm = tf.global_norm(params)
+            params = tf.trainable_variables()
+            gradients = tf.gradients(self.loss, params)
+            self.gradient_norm = tf.global_norm(gradients)
+            clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
+            self.param_norm = tf.global_norm(params)
         
         # self.loss += self.param_norm * 0.03
 
         # Define optimizer and updates
         # (updates is what you need to fetch in session.run to do a gradient update)
-        self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
-        self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+            self.global_step = tf.Variable(0, name="global_step", trainable=False)
+            opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+            self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(max_to_keep=FLAGS.keep)
@@ -154,7 +154,7 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         
-        attn_layer = Bidaf2(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        attn_layer = Bidaf(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _, _, blended_reps = attn_layer.build_graph(context_hiddens, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
         
         if self.FLAGS.cudnn_lstm: 
@@ -164,8 +164,8 @@ class QAModel(object):
         
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
 
-        attn_layer = DotProductAttn(self.keep_prob,self.FLAGS.hidden_size*2,self.FLAGS.hidden_size*2)
-        _,attn_output=attn_layer.build_graph(blended_reps,blended_reps,blended_reps,self.context_mask)
+        attn_layer = BasicAttn(self.keep_prob,self.FLAGS.hidden_size*2,self.FLAGS.hidden_size*2)
+        _,attn_output=attn_layer.build_graph(blended_reps,self.context_mask,blended_reps)
         blended_reps=tf.concat([blended_reps,attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)

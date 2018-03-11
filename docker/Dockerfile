@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:1.4.1
+FROM tensorflow/tensorflow:latest-gpu
 RUN pip install colorama==0.3.9
 RUN pip install nltk==3.2.5
 RUN pip install numpy==1.14.0
