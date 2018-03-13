@@ -46,7 +46,10 @@ def get_glove(glove_path, glove_dim):
 
     print "Loading GLoVE vectors from file: %s" % glove_path
     vocab_size = int(4e5) # this is the vocab size of the corpus we've downloaded
-    if 'fast' in glove_path:
+    if 'crawl' in glove_path:
+        vocab_size = 1005911
+#        vocab_size = 1999999
+    elif 'fast' in glove_path:
         vocab_size = int(1e6)-1
     if 'lowerfast' in glove_path:
         vocab_size= 997804
@@ -75,6 +78,7 @@ def get_glove(glove_path, glove_dim):
             word = line[0]
             vector = list(map(float, line[1:]))
             if glove_dim != len(vector):
+                print idx
                 print len(vector)
                 raise Exception("You set --glove_path=%s but --embedding_size=%i. If you set --glove_path yourself then make sure that --embedding_size matches!" % (glove_path, glove_dim))
             emb_matrix[idx, :] = vector
