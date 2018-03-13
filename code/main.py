@@ -47,8 +47,8 @@ tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 120, "Batch size to use")
-tf.app.flags.DEFINE_integer("hidden_size", 200, "Size of the hidden states")
+tf.app.flags.DEFINE_integer("batch_size", 64, "Batch size to use")
+tf.app.flags.DEFINE_integer("hidden_size", 128, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("num_layers", 1, "Number of layers")
 tf.app.flags.DEFINE_integer("context_len", 450, "The maximum context length of your model")
 tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model")
@@ -69,7 +69,7 @@ tf.app.flags.DEFINE_string("json_in_path", "", "For official_eval mode, path to 
 tf.app.flags.DEFINE_string("json_out_path", "predictions.json", "Output path for official_eval mode. Defaults to predictions.json")
 
 # Misc
-tf.app.flags.DEFINE_boolean("cudnn_lstm", False, "Whether to use cudnn_lstm")
+tf.app.flags.DEFINE_boolean("cudnn_lstm", True, "Whether to use cudnn_lstm")
 
 
 FLAGS = tf.app.flags.FLAGS
