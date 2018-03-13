@@ -138,7 +138,7 @@ class QAModel(object):
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
         if self.FLAGS.cudnn_lstm: 
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 2, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, 'l1',is_training= self.FLAGS.mode=='train') # (batch_size, context_len, hidden_size*2)
@@ -173,7 +173,7 @@ class QAModel(object):
         _,attn_output=attn_layer.build_graph(blended_reps,self.context_mask,blended_reps)
         blended_reps=tf.concat([blended_reps,attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
-            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 2, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.2',is_training=self.FLAGS.mode=='train')
@@ -188,15 +188,15 @@ class QAModel(object):
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
-#            if self.FLAGS.cudnn_lstm: 
-#                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
-#            else:
-#                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-#            output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
-            
-            softmax_layer_end = SimpleSoftmaxLayer()
             logits_start_exp = tf.expand_dims(self.logits_start, axis=2)
             blended_reps_final = tf.concat([blended_reps_final, logits_start_exp], axis=2)
+           if self.FLAGS.cudnn_lstm: 
+               end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+           else:
+               end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+           output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
+            
+            softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
