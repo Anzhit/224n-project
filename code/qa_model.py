@@ -190,6 +190,8 @@ class QAModel(object):
 #            output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
             
             softmax_layer_end = SimpleSoftmaxLayer()
+            logits_start_exp = tf.expand_dims(self.logits_start, axis=2)
+            blended_reps_final = tf.concat([blended_reps_final, logits_start_exp], axis=2)
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
