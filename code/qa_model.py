@@ -52,7 +52,7 @@ class QAModel(object):
         self.FLAGS = FLAGS
         self.id2word = id2word
         self.word2id = word2id
-
+        self.emb=emb_matrix
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
             self.add_placeholders()
@@ -75,7 +75,7 @@ class QAModel(object):
             
             # Exponential decay
             starter_learning_rate = FLAGS.learning_rate
-            learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 750, 0.96, staircase=True)
+            learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 7000, 0.5, staircase=True)
             
             opt = tf.train.AdamOptimizer(learning_rate=learning_rate) # you can try other optimizers
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
@@ -98,7 +98,7 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
-
+        self.emb_matrix = tf.placeholder(tf.float32, shape=[None, self.FLAGS.embedding_size])
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
@@ -116,9 +116,10 @@ class QAModel(object):
 
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
             with tf.device('/cpu:0'):
-                embedding_matrix1 = tf.constant(emb_matrix[:int(emb_matrix.shape[0]/2),:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
-                embedding_matrix2 = tf.constant(emb_matrix[int(emb_matrix.shape[0]/2):,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
-                embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
+                # embedding_matrix1 = tf.constant(emb_matrix[:emb_matrix.shape[0]/2,:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
+                # embedding_matrix2 = tf.constant(emb_matrix[emb_matrix.shape[0]/2:,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
+                embedding_matrix=self.emb_matrix
+                # embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
                 # Get the word embeddings for the context and question,
                 # using the placeholders self.context_ids and self.qn_ids
                 self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
@@ -258,6 +259,7 @@ class QAModel(object):
         """
         # Match up our input data with the placeholders
         input_feed = {}
+        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
@@ -290,6 +292,7 @@ class QAModel(object):
         """
 
         input_feed = {}
+        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
@@ -316,6 +319,7 @@ class QAModel(object):
           probdist_start and probdist_end: both shape (batch_size, context_len)
         """
         input_feed = {}
+        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
