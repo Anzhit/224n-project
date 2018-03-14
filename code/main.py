@@ -163,7 +163,7 @@ def main(unused_argv):
         with tf.Session(config=config) as sess:
 
             # Load most recent model
-            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=False)
+            initialize_model(sess, qa_model, FLAGS.train_dir, expect_exists=False)
 
             # Train
             qa_model.train(sess, train_context_path, train_qn_path, train_ans_path, dev_qn_path, dev_context_path, dev_ans_path)

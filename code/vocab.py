@@ -47,7 +47,7 @@ def get_glove(glove_path, glove_dim):
     print "Loading GLoVE vectors from file: %s" % glove_path
     vocab_size = int(4e5) # this is the vocab size of the corpus we've downloaded
     if 'crawl' in glove_path:
-        vocab_size = 1005911
+        vocab_size = 2000000
 #        vocab_size = 1999999
     elif 'fast' in glove_path:
         vocab_size = int(1e6)-1

@@ -115,12 +115,14 @@ class QAModel(object):
         with vs.variable_scope("embeddings"):
 
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
-            embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
-
-            # Get the word embeddings for the context and question,
-            # using the placeholders self.context_ids and self.qn_ids
-            self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
-            self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+            with tf.device('/cpu:0'):
+                embedding_matrix1 = tf.constant(emb_matrix[:int(emb_matrix.shape[0]/2),:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
+                embedding_matrix2 = tf.constant(emb_matrix[int(emb_matrix.shape[0]/2):,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
+                embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
+                # Get the word embeddings for the context and question,
+                # using the placeholders self.context_ids and self.qn_ids
+                self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
+                self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
 
     def build_graph(self):
@@ -137,17 +139,20 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
+        r1=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(self.context_embs,2),
+        tf.transpose(tf.nn.l2_normalize(self.qn_embs,2),perm=[0,2,1])),axis=2,keepdims=True)
+        r2=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(self.qn_embs,2),
+        tf.transpose(tf.nn.l2_normalize(self.context_embs,2),perm=[0,2,1])),axis=2,keepdims=True)
+        self.context_embs=tf.concat([self.context_embs,r1],axis=2)
+        self.qn_embs=tf.concat([self.qn_embs,r2],axis=2)
         if self.FLAGS.cudnn_lstm: 
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 2, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, 'l1',is_training= self.FLAGS.mode=='train') # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask, 'l1',is_training=self.FLAGS.mode=='train') # (batch_size, question_len, hidden_size*2)
         
-        # FIlter Layer
-       # r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
-       # tf.transpose(tf.nn.l2_normalize(question_hiddens,2),perm=[0,2,1])),axis=2,keepdims=True)
-       # context_hiddens_orig=context_hiddens_orig*r
+       #  FIlter Layer
         # Use context hidden states to attend to question hidden states
 #         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
 #         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
@@ -173,7 +178,7 @@ class QAModel(object):
         _,attn_output=attn_layer.build_graph(blended_reps,self.context_mask,blended_reps)
         blended_reps=tf.concat([blended_reps,attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
-            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 2, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.2',is_training=self.FLAGS.mode=='train')
@@ -190,11 +195,11 @@ class QAModel(object):
         with vs.variable_scope("EndDist"):
             logits_start_exp = tf.expand_dims(self.logits_start, axis=2)
             blended_reps_final = tf.concat([blended_reps_final, logits_start_exp], axis=2)
-           if self.FLAGS.cudnn_lstm: 
-               end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
-           else:
-               end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-           output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
+          #  if self.FLAGS.cudnn_lstm: 
+          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+          #  else:
+          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+          # blended_reps_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
             
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
