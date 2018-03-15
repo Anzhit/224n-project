@@ -26,7 +26,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import embedding_ops
-
+from tensorflow.python.ops import variables
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
@@ -56,7 +56,7 @@ class QAModel(object):
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
             self.add_placeholders()
-            self.add_embedding_layer(emb_matrix)
+            self.add_embedding_layer(emb_matrix.shape)
             self.build_graph()
             self.add_loss()
         if self.FLAGS.mode=='train':
@@ -77,11 +77,11 @@ class QAModel(object):
             starter_learning_rate = FLAGS.learning_rate
             learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 7000, 0.5, staircase=True)
             
-            opt = tf.train.AdamOptimizer(learning_rate=learning_rate) # you can try other optimizers
+            opt = tf.train.AdamOptimizer(learning_rate=starter_learning_rate) # you can try other optimizers
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
-        self.saver = tf.train.Saver(max_to_keep=FLAGS.keep)
+        self.saver = tf.train.Saver(variables._all_saveable_objects()[1:], max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(max_to_keep=1)
         self.summaries = tf.summary.merge_all()
 
@@ -98,13 +98,15 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
-        self.emb_matrix = tf.placeholder(tf.float32, shape=[None, self.FLAGS.embedding_size])
+        self.emb_matrix = tf.placeholder(tf.float32, shape=self.emb.shape)
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-
-    def add_embedding_layer(self, emb_matrix):
+    def feed_embedding(self,session):
+        set_emb=self.embedding_matrix.assign(self.emb_matrix)
+        session.run(set_emb,feed_dict={self.emb_matrix:self.emb})
+    def add_embedding_layer(self,emb_matrix_shape):
         """
         Adds word embedding layer to the graph.
 
@@ -118,12 +120,13 @@ class QAModel(object):
             with tf.device('/cpu:0'):
                 # embedding_matrix1 = tf.constant(emb_matrix[:emb_matrix.shape[0]/2,:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
                 # embedding_matrix2 = tf.constant(emb_matrix[emb_matrix.shape[0]/2:,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
-                embedding_matrix=self.emb_matrix
+                self.embedding_matrix=tf.Variable(tf.zeros(emb_matrix_shape),trainable=False,name="embedding")
+
                 # embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
                 # Get the word embeddings for the context and question,
                 # using the placeholders self.context_ids and self.qn_ids
-                self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
-                self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+                self.context_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
+                self.qn_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
 
     def build_graph(self):
@@ -259,7 +262,6 @@ class QAModel(object):
         """
         # Match up our input data with the placeholders
         input_feed = {}
-        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
@@ -292,7 +294,6 @@ class QAModel(object):
         """
 
         input_feed = {}
-        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
@@ -319,7 +320,6 @@ class QAModel(object):
           probdist_start and probdist_end: both shape (batch_size, context_len)
         """
         input_feed = {}
-        input_feed[self.emb_matrix]=self.emb
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids

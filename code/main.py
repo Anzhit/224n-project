@@ -87,6 +87,7 @@ def initialize_model(session, model, train_dir, expect_exists):
       expect_exists: If True, throw an error if no checkpoint is found.
         If False, initialize fresh model if no checkpoint is found.
     """
+    model.feed_embedding(session)
     print "Looking for model at %s..." % train_dir
     ckpt = tf.train.get_checkpoint_state(train_dir)
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
