@@ -76,7 +76,7 @@ FLAGS = tf.app.flags.FLAGS
 os.environ["CUDA_VISIBLE_DEVICES"] = str(FLAGS.gpu)
 
 
-def initialize_model(session, model, train_dir, expect_exists):
+def initialize_model(session, model, train_dir, expect_exists,emb_matrix):
     """
     Initializes model from train_dir.
 
@@ -87,7 +87,7 @@ def initialize_model(session, model, train_dir, expect_exists):
       expect_exists: If True, throw an error if no checkpoint is found.
         If False, initialize fresh model if no checkpoint is found.
     """
-    model.feed_embedding(session)
+    # model.feed_embedding(session)
     print "Looking for model at %s..." % train_dir
     ckpt = tf.train.get_checkpoint_state(train_dir)
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
@@ -99,7 +99,7 @@ def initialize_model(session, model, train_dir, expect_exists):
             raise Exception("There is no saved checkpoint at %s" % train_dir)
         else:
             print "There is no saved checkpoint at %s. Creating model with fresh parameters." % train_dir
-            session.run(tf.global_variables_initializer())
+            session.run(tf.global_variables_initializer(),feed_dict={model.emb_matrix:emb_matrix})
 #            print 'Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables())
 
 
@@ -164,7 +164,7 @@ def main(unused_argv):
         with tf.Session(config=config) as sess:
 
             # Load most recent model
-            initialize_model(sess, qa_model, FLAGS.train_dir, expect_exists=False)
+            initialize_model(sess, qa_model, FLAGS.train_dir,False,emb_matrix)
 
             # Train
             qa_model.train(sess, train_context_path, train_qn_path, train_ans_path, dev_qn_path, dev_context_path, dev_ans_path)
@@ -174,7 +174,7 @@ def main(unused_argv):
         with tf.Session(config=config) as sess:
 
             # Load best model
-            initialize_model(sess, qa_model, bestmodel_dir, expect_exists=True)
+            initialize_model(sess, qa_model, bestmodel_dir,True,emb_matrix)
 
             # Show examples with F1/EM scores
             _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=10, print_to_screen=True)
@@ -192,7 +192,7 @@ def main(unused_argv):
         with tf.Session(config=config) as sess:
 
             # Load model from ckpt_load_dir
-            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir,True,emb_matrix)
 
             # Get a predicted answer for each example in the data
             # Return a mapping answers_dict from uuid to answer

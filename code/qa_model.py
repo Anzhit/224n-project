@@ -62,6 +62,7 @@ class QAModel(object):
         if self.FLAGS.mode=='train':
         # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
             params = tf.trainable_variables()
+
             gradients = tf.gradients(self.loss, params)
             self.gradient_norm = tf.global_norm(gradients)
             clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
@@ -103,9 +104,6 @@ class QAModel(object):
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-    def feed_embedding(self,session):
-        set_emb=self.embedding_matrix.assign(self.emb_matrix)
-        session.run(set_emb,feed_dict={self.emb_matrix:self.emb})
     def add_embedding_layer(self,emb_matrix_shape):
         """
         Adds word embedding layer to the graph.
@@ -120,7 +118,7 @@ class QAModel(object):
             with tf.device('/cpu:0'):
                 # embedding_matrix1 = tf.constant(emb_matrix[:emb_matrix.shape[0]/2,:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
                 # embedding_matrix2 = tf.constant(emb_matrix[emb_matrix.shape[0]/2:,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
-                self.embedding_matrix=tf.Variable(tf.zeros(emb_matrix_shape),trainable=False,name="embedding")
+                self.embedding_matrix=tf.Variable(self.emb_matrix,trainable=False,name="embedding")
 
                 # embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
                 # Get the word embeddings for the context and question,
