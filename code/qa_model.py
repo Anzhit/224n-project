@@ -26,7 +26,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import embedding_ops
-
+from tensorflow.python.ops import variables
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
@@ -52,16 +52,17 @@ class QAModel(object):
         self.FLAGS = FLAGS
         self.id2word = id2word
         self.word2id = word2id
-
+        self.emb=emb_matrix
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
             self.add_placeholders()
-            self.add_embedding_layer(emb_matrix)
+            self.add_embedding_layer(emb_matrix.shape)
             self.build_graph()
             self.add_loss()
         if self.FLAGS.mode=='train':
         # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
             params = tf.trainable_variables()
+
             gradients = tf.gradients(self.loss, params)
             self.gradient_norm = tf.global_norm(gradients)
             clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
@@ -75,13 +76,13 @@ class QAModel(object):
             
             # Exponential decay
             starter_learning_rate = FLAGS.learning_rate
-            learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 750, 0.96, staircase=True)
+            learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 7000, 0.5, staircase=True)
             
-            opt = tf.train.AdamOptimizer(learning_rate=learning_rate) # you can try other optimizers
+            opt = tf.train.AdamOptimizer(learning_rate=starter_learning_rate) # you can try other optimizers
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
-        self.saver = tf.train.Saver(max_to_keep=FLAGS.keep)
+        self.saver = tf.train.Saver(variables._all_saveable_objects()[1:], max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(max_to_keep=1)
         self.summaries = tf.summary.merge_all()
 
@@ -98,13 +99,12 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
-
+        self.emb_matrix = tf.placeholder(tf.float32, shape=self.emb.shape)
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-
-    def add_embedding_layer(self, emb_matrix):
+    def add_embedding_layer(self,emb_matrix_shape):
         """
         Adds word embedding layer to the graph.
 
@@ -113,14 +113,17 @@ class QAModel(object):
             The GloVe vectors, plus vectors for PAD and UNK.
         """
         with vs.variable_scope("embeddings"):
+            # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
             with tf.device('/cpu:0'):
-                # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
-                embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
+                # embedding_matrix1 = tf.constant(emb_matrix[:emb_matrix.shape[0]/2,:], dtype=tf.float32, name="emb_matrix1") # shape (400002, embedding_size)
+                # embedding_matrix2 = tf.constant(emb_matrix[emb_matrix.shape[0]/2:,:], dtype=tf.float32, name="emb_matrix2") # shape (400002, embedding_size)
+                self.embedding_matrix=tf.Variable(self.emb_matrix,trainable=False,name="embedding")
 
+                # embedding_matrix=tf.concat([embedding_matrix1,embedding_matrix2],axis=0)
                 # Get the word embeddings for the context and question,
                 # using the placeholders self.context_ids and self.qn_ids
-                self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
-                self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+                self.context_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
+                self.qn_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
 
     def build_graph(self):
@@ -137,17 +140,20 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
+        r1=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(self.context_embs,2),
+        tf.transpose(tf.nn.l2_normalize(self.qn_embs,2),perm=[0,2,1])),axis=2,keepdims=True)
+        r2=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(self.qn_embs,2),
+        tf.transpose(tf.nn.l2_normalize(self.context_embs,2),perm=[0,2,1])),axis=2,keepdims=True)
+        self.context_embs=tf.concat([self.context_embs,r1],axis=2)
+        self.qn_embs=tf.concat([self.qn_embs,r2],axis=2)
         if self.FLAGS.cudnn_lstm: 
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, 'l1',is_training= self.FLAGS.mode=='train') # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask, 'l1',is_training=self.FLAGS.mode=='train') # (batch_size, question_len, hidden_size*2)
         
-        # FIlter Layer
-       # r=tf.reduce_max(tf.matmul(tf.nn.l2_normalize(context_hiddens_orig,2),
-       # tf.transpose(tf.nn.l2_normalize(question_hiddens,2),perm=[0,2,1])),axis=2,keepdims=True)
-       # context_hiddens_orig=context_hiddens_orig*r
+       #  FIlter Layer
         # Use context hidden states to attend to question hidden states
 #         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
 #         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
@@ -173,7 +179,7 @@ class QAModel(object):
         _,attn_output=attn_layer.build_graph(blended_reps,self.context_mask,blended_reps)
         blended_reps=tf.concat([blended_reps,attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
-            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.2',is_training=self.FLAGS.mode=='train')
@@ -188,15 +194,15 @@ class QAModel(object):
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
-#            if self.FLAGS.cudnn_lstm: 
-#                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
-#            else:
-#                end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-#            output_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
-            
-            softmax_layer_end = SimpleSoftmaxLayer()
             logits_start_exp = tf.expand_dims(self.logits_start, axis=2)
             blended_reps_final = tf.concat([blended_reps_final, logits_start_exp], axis=2)
+          #  if self.FLAGS.cudnn_lstm: 
+          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+          #  else:
+          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+          # blended_reps_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
+            
+            softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
