@@ -422,7 +422,12 @@ class SelfAttn(object):
             v=tf.get_variable("v",shape=[self.vec_size,], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
 
             keys_proj=tf.transpose(tf.tensordot(Wv,values,axes=((1,),(2,))),perm=[1,2,0])
-            attn_logits=tf.map_fn(lambda x: tf.reduce_sum(v*tf.nn.tanh(keys_proj+tf.expand_dims(tf.matmul(x,Wk),1)),axis=2),tf.transpose(values, perm=[1, 0, 2]))
+            attn_logits=[]
+            loop=tf.unstack(values,axis=1)
+            for i in loop:
+                attn_logits.append(tf.reduce_sum(v*tf.nn.tanh(keys_proj+tf.expand_dims(tf.matmul(i,Wk),1)),axis=2))
+
+            attn_logits=tf.stack(attn_logits)
             attn_logits=tf.transpose(attn_logits,perm=[1,0,2])
             # Calculate attention distribution
             values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
