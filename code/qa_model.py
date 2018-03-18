@@ -30,7 +30,7 @@ from tensorflow.python.ops import variables
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, SelfAttn,Bidaf, Bidaf2
+from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, SelfAttn,Bidaf, Bidaf2, BasicAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -149,6 +149,7 @@ class QAModel(object):
         tf.transpose(tf.nn.l2_normalize(self.context_embs,2),perm=[0,2,1])),axis=2,keepdims=True)
         self.context_embs=tf.concat([self.context_embs,r1],axis=2)
         self.qn_embs=tf.concat([self.qn_embs,r2],axis=2)
+        
         if self.FLAGS.cudnn_lstm: 
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
@@ -178,9 +179,13 @@ class QAModel(object):
         
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
 
-        attn_layer = SelfAttn(self.keep_prob,self.FLAGS.hidden_size*2)
-        _,attn_output=attn_layer.build_graph(blended_reps,self.context_mask,"SelfAtt")
-        blended_reps=tf.concat([blended_reps,attn_output],axis=2)
+        attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _,attn_output1 = attn_layer.build_graph(question_hiddens, self.qn_mask, blended_reps, 'b1') #, self.context_mask, question_hiddens)
+        
+        attn_layer2 = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _,attn_output = attn_layer2.build_graph(question_hiddens, self.qn_mask, attn_output1, 'b2') #, self.context_mask, question_hiddens)
+        
+        blended_reps=tf.concat([blended_reps, attn_output, attn_output1],axis=2)
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
