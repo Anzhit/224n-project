@@ -98,7 +98,7 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
-        self.learning_rate = tf.placeholder(tf.int32, shape=())
+        self.learning_rate = tf.placeholder(tf.float32, shape=())
         self.emb_matrix = tf.placeholder(tf.float32, shape=self.emb.shape)
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -183,8 +183,14 @@ class QAModel(object):
         attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _,attn_output1 = attn_layer.build_graph(question_hiddens, self.qn_mask, blended_reps, 'b1') #, self.context_mask, question_hiddens)
         
+        if self.FLAGS.cudnn_lstm: 
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
+        else:
+            out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+        blended_reps2 =out_rnn.build_graph(attn_output1, self.context_mask,id='la2.2',is_training=self.FLAGS.mode=='train')
+        
         attn_layer2 = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _,attn_output = attn_layer2.build_graph(question_hiddens, self.qn_mask, attn_output1, 'b2') #, self.context_mask, question_hiddens)
+        _,attn_output = attn_layer2.build_graph(question_hiddens, self.qn_mask, blended_reps2, 'b2') #, self.context_mask, question_hiddens)
         
         blended_reps=tf.concat([blended_reps, attn_output, attn_output1],axis=2)
         if self.FLAGS.cudnn_lstm: 
@@ -559,10 +565,10 @@ class QAModel(object):
                     logging.info("Epoch %d, Iter %d, dev loss: %f" % (epoch, global_step, dev_loss))
                     write_summary(dev_loss, "dev/loss", summary_writer, global_step)
 
+                    best_dev_loss = min(best_dev_loss, dev_loss)
                     if dev_loss > best_dev_loss:
                         logging.info("Reducing LR now")
                         self.lr = 0.5 * self.lr
-                        best_dev_loss = min(best_dev_loss, dev_loss)
                                         
                     # Get F1/EM on train set and log to tensorboard
                     train_f1, train_em = self.check_f1_em(session, train_context_path, train_qn_path, train_ans_path, "train", num_samples=1000)
