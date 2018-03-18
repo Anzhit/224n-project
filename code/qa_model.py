@@ -53,6 +53,7 @@ class QAModel(object):
         self.id2word = id2word
         self.word2id = word2id
         self.emb=emb_matrix
+        self.lr = FLAGS.learning_rate
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
             self.add_placeholders()
@@ -74,17 +75,16 @@ class QAModel(object):
             self.global_step = tf.Variable(0, name="global_step", trainable=False)
             
             # Exponential decay
-            starter_learning_rate = FLAGS.learning_rate
-            learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 7000, 0.5, staircase=True)
+            #starter_learning_rate = FLAGS.learning_rate
+            #learning_rate = tf.train.exponential_decay(starter_learning_rate, self.global_step, 7000, 0.5, staircase=True)
             
-            opt = tf.train.AdamOptimizer(learning_rate=starter_learning_rate) # you can try other optimizers
+            opt = tf.train.AdamOptimizer(learning_rate=self.learning_rate) # you can try other optimizers
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(variables._all_saveable_objects()[1:], max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(max_to_keep=1)
         self.summaries = tf.summary.merge_all()
-
 
     def add_placeholders(self):
         """
@@ -98,6 +98,7 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
+        self.learning_rate = tf.placeholder(tf.int32, shape=())
         self.emb_matrix = tf.placeholder(tf.float32, shape=self.emb.shape)
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -272,6 +273,7 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
+        input_feed[self.learning_rate] = self.lr
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
         self.FLAGS.mode='train'
         # output_feed contains the things we want to fetch.
@@ -304,6 +306,7 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
+        input_feed[self.learning_rate] = self.lr
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
         self.FLAGS.mode='test'
         output_feed = [self.loss]
@@ -329,6 +332,7 @@ class QAModel(object):
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.learning_rate] = self.lr
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
         self.FLAGS.mode='test'
         output_feed = [self.probdist_start, self.probdist_end]
@@ -398,7 +402,7 @@ class QAModel(object):
 
         # Overall loss is total loss divided by total number of examples
         dev_loss = sum(loss_per_batch) / float(total_num_examples)
-
+        
         return dev_loss
 
 
@@ -508,8 +512,9 @@ class QAModel(object):
         bestmodel_dir = os.path.join(self.FLAGS.train_dir, "best_checkpoint")
         bestmodel_ckpt_path = os.path.join(bestmodel_dir, "qa_best.ckpt")
         best_dev_f1 = None
+        best_dev_loss = 100.0
         best_dev_em = None
-
+        
         # for TensorBoard
         summary_writer = tf.summary.FileWriter(self.FLAGS.train_dir, session.graph)
 
@@ -554,7 +559,11 @@ class QAModel(object):
                     logging.info("Epoch %d, Iter %d, dev loss: %f" % (epoch, global_step, dev_loss))
                     write_summary(dev_loss, "dev/loss", summary_writer, global_step)
 
-
+                    if dev_loss > best_dev_loss:
+                        logging.info("Reducing LR now")
+                        self.lr = 0.5 * self.lr
+                        best_dev_loss = min(best_dev_loss, dev_loss)
+                                        
                     # Get F1/EM on train set and log to tensorboard
                     train_f1, train_em = self.check_f1_em(session, train_context_path, train_qn_path, train_ans_path, "train", num_samples=1000)
                     logging.info("Epoch %d, Iter %d, Train F1 score: %f, Train EM score: %f" % (epoch, global_step, train_f1, train_em))
@@ -570,8 +579,8 @@ class QAModel(object):
 
 
                     # Early stopping based on dev EM. You could switch this to use F1 instead.
-                    if best_dev_em is None or dev_em > best_dev_em:
-                        best_dev_em = dev_em
+                    if best_dev_f1 is None or dev_f1 > best_dev_f1:
+                        best_dev_f1 = dev_f1
                         logging.info("Saving to %s..." % bestmodel_ckpt_path)
                         self.bestmodel_saver.save(session, bestmodel_ckpt_path, global_step=global_step)
 
