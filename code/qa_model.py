@@ -30,7 +30,7 @@ from tensorflow.python.ops import variables
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, SelfAttn,Bidaf, Bidaf2, BasicAttn
+from modules import * # RNNEncoder, SimpleSoftmaxLayer, ComplexAttn,DotProductAttn, SelfAttn,Bidaf, Bidaf2, BasicAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -128,6 +128,7 @@ class QAModel(object):
                 # using the placeholders self.context_ids and self.qn_ids
                 self.context_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
                 self.qn_embs = embedding_ops.embedding_lookup(self.embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+                
 
 
     def build_graph(self):
@@ -181,18 +182,22 @@ class QAModel(object):
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
 
         attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _,attn_output1 = attn_layer.build_graph(question_hiddens, self.qn_mask, blended_reps, 'b1') #, self.context_mask, question_hiddens)
+        _,attn_output1 = attn_layer.build_graph(blended_reps, self.context_mask, blended_reps, 'b1') #, self.context_mask, question_hiddens)
         
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-        blended_reps2 =out_rnn.build_graph(attn_output1, self.context_mask,id='la2.2',is_training=self.FLAGS.mode=='train')
+        blended_reps2 = out_rnn.build_graph(attn_output1, self.context_mask,id='la2.2',is_training=self.FLAGS.mode=='train')
         
         attn_layer2 = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _,attn_output = attn_layer2.build_graph(question_hiddens, self.qn_mask, blended_reps2, 'b2') #, self.context_mask, question_hiddens)
+        _,attn_output = attn_layer2.build_graph(blended_reps2, self.context_mask, blended_reps2, 'b2') #, self.context_mask, question_hiddens)
         
-        blended_reps=tf.concat([blended_reps, attn_output, attn_output1],axis=2)
+        high = Highway(self.FLAGS.hidden_size*2)
+        attn_output = high.build_graph(attn_output, attn_output1, 'h1')
+        
+        
+        blended_reps=tf.concat([blended_reps, attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
@@ -518,7 +523,7 @@ class QAModel(object):
         bestmodel_dir = os.path.join(self.FLAGS.train_dir, "best_checkpoint")
         bestmodel_ckpt_path = os.path.join(bestmodel_dir, "qa_best.ckpt")
         best_dev_f1 = None
-        best_dev_loss = 100.0
+        prev_dev_loss = 100.0
         best_dev_em = None
         
         # for TensorBoard
@@ -565,10 +570,11 @@ class QAModel(object):
                     logging.info("Epoch %d, Iter %d, dev loss: %f" % (epoch, global_step, dev_loss))
                     write_summary(dev_loss, "dev/loss", summary_writer, global_step)
 
-                    best_dev_loss = min(best_dev_loss, dev_loss)
-                    if dev_loss > best_dev_loss:
+                    
+                    if dev_loss > prev_dev_loss:
                         logging.info("Reducing LR now")
                         self.lr = 0.5 * self.lr
+                    prev_dev_loss = dev_loss
                                         
                     # Get F1/EM on train set and log to tensorboard
                     train_f1, train_em = self.check_f1_em(session, train_context_path, train_qn_path, train_ans_path, "train", num_samples=1000)

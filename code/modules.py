@@ -134,6 +134,18 @@ class SimpleSoftmaxLayer(object):
 
             return masked_logits, prob_dist
 
+class Highway(object):
+    def __init__(self, dim):
+        self.dim = dim
+        
+    def build_graph(self, inputs1, inputs2, t):
+        W1 = tf.get_variable("H1"+str(t), shape=[self.dim, self.dim], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+        W2 = tf.get_variable("H2"+str(t), shape=[self.dim, self.dim], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+        
+        term1 = tf.tensordot(inputs1, W1, axes=((2),(0)))
+        term2 = tf.tensordot(inputs1, W1, axes=((2),(0)))
+        T = tf.nn.sigmoid(term1 + term2)
+        return T * inputs1 + (1 - T) * inputs2
         
 class Bidaf(object):
     def __init__(self, keep_prob, context_vec_size, qn_vec_size):
