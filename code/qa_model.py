@@ -161,8 +161,8 @@ class QAModel(object):
         
        #  FIlter Layer
         # Use context hidden states to attend to question hidden states
-#         attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-#         _, blended_reps = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens_orig,"q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
+        attn_layer = ComplexAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _, blended_reps_comp = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, "q2cAttention") # attn_output is shape (batch_size, context_len, hidden_size*2)
 
 #         # Concat attn_output to context_hiddens to get blended_reps
         
@@ -178,7 +178,6 @@ class QAModel(object):
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-        
         blended_reps=out_rnn.build_graph(blended_reps,self.context_mask,id='l2.1',is_training=self.FLAGS.mode=='train')
 
         attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
@@ -188,16 +187,16 @@ class QAModel(object):
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-        blended_reps2 = out_rnn.build_graph(attn_output1, self.context_mask,id='la2.2',is_training=self.FLAGS.mode=='train')
+        blended_reps2 = out_rnn.build_graph(blended_reps_comp, self.context_mask,id='la2.2',is_training=self.FLAGS.mode=='train')
         
         attn_layer2 = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _,attn_output = attn_layer2.build_graph(blended_reps2, self.context_mask, blended_reps2, 'b2') #, self.context_mask, question_hiddens)
         
-        high = Highway(self.FLAGS.hidden_size*2)
-        attn_output = high.build_graph(attn_output, attn_output1, 'h1')
+#         high = Highway(self.FLAGS.hidden_size*2)
+#         attn_output = high.build_graph(attn_output, attn_output1, 'h1')
         
         
-        blended_reps=tf.concat([blended_reps, attn_output],axis=2)
+        blended_reps=tf.concat([attn_output1, attn_output],axis=2)
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
@@ -216,11 +215,12 @@ class QAModel(object):
         with vs.variable_scope("EndDist"):
             logits_start_exp = tf.expand_dims(self.logits_start, axis=2)
             blended_reps_final = tf.concat([blended_reps_final, logits_start_exp], axis=2)
-          #  if self.FLAGS.cudnn_lstm: 
-          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
-          #  else:
-          #      end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
-          # blended_reps_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
+            
+#             if self.FLAGS.cudnn_lstm: 
+#                 end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size)
+#             else:
+#                 end_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers)
+#             blended_reps_final = end_rnn.build_graph(blended_reps_final, self.context_mask, id='end1')
             
             softmax_layer_end = SimpleSoftmaxLayer()
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
@@ -573,7 +573,7 @@ class QAModel(object):
                     
                     if dev_loss > prev_dev_loss:
                         logging.info("Reducing LR now")
-                        self.lr = 0.5 * self.lr
+                        self.lr = max(1e-4, 0.5 * self.lr)
                     prev_dev_loss = dev_loss
                                         
                     # Get F1/EM on train set and log to tensorboard
