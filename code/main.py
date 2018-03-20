@@ -27,7 +27,7 @@ import tensorflow as tf
 
 from qa_model import QAModel
 from vocab import get_glove
-from official_eval_helper import get_json_data, generate_answers
+from official_eval_helper import get_json_data, generate_answers, save_answer_probs
 
 
 logging.basicConfig(level=logging.INFO)
@@ -204,7 +204,81 @@ def main(unused_argv):
             with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
                 f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
                 print "Wrote predictions to %s" % FLAGS.json_out_path
+    
+    elif FLAGS.mode == 'saveProbs':
+        if FLAGS.json_in_path == "":
+            raise Exception("For official_eval mode, you need to specify --json_in_path")
+        if FLAGS.ckpt_load_dir == "":
+            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
 
+        # Read the JSON data from file
+        qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
+
+        with tf.Session(config=config) as sess:
+
+            # Load model from ckpt_load_dir
+            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+
+            # Get a predicted answer for each example in the data
+            # Return a mapping answers_dict from uuid to answer
+            answers_dict = save_answer_probs(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+
+            # Write the uuid->answer mapping a to json file in root dir
+            print "Writing predictions to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path, 'wb') as f:
+                import pickle
+                pickle.dump(answers_dict, f, protocol=2)
+                # f.write(unicode(pickle.dumps(answers_dict, ensure_ascii=False)))
+                # f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+                print "Wrote predictions to %s" % FLAGS.json_out_path
+                
+#     elif FLAGS.mode == 'loadProbs':
+#         if FLAGS.json_in_path == "":
+#             raise Exception("For official_eval mode, you need to specify --json_in_path")
+#         if FLAGS.ckpt_load_dir == "":
+#             raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
+
+#         # Read the JSON data from file
+#         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
+
+#         dictLists = []
+#         for file in os.listdir('./pickles'):
+#             prob_dict = pickle.load(open(f, 'rb'))
+#             dictLists += [prob_dict]
+        
+# #         mainDict = []
+# #         for k in dictList[0].keys():
+            
+            
+            
+# #             # Take argmax to get start_pos and end_post, both shape (batch_size)
+# #             end_dp=np.zeros(end_dist.shape)
+# #             # start_pos = np.argmax(start_dist, axis=1)
+# #             # end_pos = np.argmax(end_dist, axis=1)
+# #             end_dp[:,-1]=end_dist[:,-1]
+# #             for i in range(len(end_dist[0])-2,-1,-1):
+# #                 end_dp[:,i]=np.amax([end_dist[:,i],end_dp[:,i+1]],axis=0)
+# #             start_pos=np.argmax(start_dist*end_dp,axis=1)
+# #             end_pos=map(lambda i:start_pos[i]+np.argmax(end_dist[i,start_pos[i]:]),range(len(end_dist)))
+# #             return start_pos, np.asarray(end_pos)
+        
+#         with tf.Session(config=config) as sess:
+
+#             # Load model from ckpt_load_dir
+#             initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+
+#             # Get a predicted answer for each example in the data
+#             # Return a mapping answers_dict from uuid to answer
+#             answers_dict = save_answer_probs(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+
+#             # Write the uuid->answer mapping a to json file in root dir
+#             print "Writing predictions to %s..." % FLAGS.json_out_path
+#             with io.open(FLAGS.json_out_path, 'wb') as f:
+#                 import pickle
+#                 pickle.dump(answers_dict, f, protocol=2)
+#                 # f.write(unicode(pickle.dumps(answers_dict, ensure_ascii=False)))
+#                 # f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+#                 print "Wrote predictions to %s" % FLAGS.json_out_path
 
     else:
         raise Exception("Unexpected value of FLAGS.mode: %s" % FLAGS.mode)

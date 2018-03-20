@@ -351,6 +351,22 @@ class QAModel(object):
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
         return probdist_start, probdist_end
     
+    def get_start_end_pos_prob(self, session, batch):
+        """
+        Run forward-pass only; get the most likely answer span.
+
+        Inputs:
+          session: TensorFlow session
+          batch: Batch object
+
+        Returns:
+          start_pos, end_pos: both numpy arrays shape (batch_size).
+            The most likely start and end positions for each example in the batch.
+        """
+        # Get start_dist and end_dist, both shape (batch_size, context_len)
+        start_dist, end_dist = self.get_prob_dists(session, batch)
+        return start_dist, end_dist
+
     def get_start_end_pos(self, session, batch):
         """
         Run forward-pass only; get the most likely answer span.

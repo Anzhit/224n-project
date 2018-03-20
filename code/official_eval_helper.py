@@ -279,3 +279,52 @@ def generate_answers(session, model, word2id, qn_uuid_data, context_token_data, 
     print "Finished generating answers for dataset."
 
     return uuid2ans
+
+
+def save_answer_probs(session, model, word2id, qn_uuid_data, context_token_data, qn_token_data):
+    """
+    Given a model, and a set of (context, question) pairs, each with a unique ID,
+    use the model to generate an answer for each pair, and return a dictionary mapping
+    each unique ID to the generated answer.
+
+    Inputs:
+      session: TensorFlow session
+      model: QAModel
+      word2id: dictionary mapping word (string) to word id (int)
+      qn_uuid_data, context_token_data, qn_token_data: lists
+
+    Outputs:
+      uuid2ans: dictionary mapping uuid (string) to predicted answer (string; detokenized)
+    """
+    uuid2ans = {} # maps uuid to string containing predicted answer
+    data_size = len(qn_uuid_data)
+    num_batches = ((data_size-1) / model.FLAGS.batch_size) + 1
+    batch_num = 0
+    detokenizer = MosesDetokenizer()
+
+    print "Generating answers..."
+
+    for batch in get_batch_generator(word2id, qn_uuid_data, context_token_data, qn_token_data, model.FLAGS.batch_size, model.FLAGS.context_len, model.FLAGS.question_len):
+
+        # Get the predicted spans
+        pred_start_batch, pred_end_batch = model.get_start_end_pos_prob(session, batch)
+
+        # Convert pred_start_batch and pred_end_batch to lists length batch_size
+        pred_start_batch = pred_start_batch.tolist()
+        pred_end_batch = pred_end_batch.tolist()
+
+        # For each example in the batch:
+        for ex_idx, (pred_start, pred_end) in enumerate(zip(pred_start_batch, pred_end_batch)):
+
+            # Detokenize and add to dict
+            uuid = batch.uuids[ex_idx]
+            uuid2ans[uuid] = (pred_start_batch, pred_end_batch)
+            
+        batch_num += 1
+        
+        if batch_num % 10 == 0:
+            print "Generated answers for %i/%i batches = %.2f%%" % (batch_num, num_batches, batch_num*100.0/num_batches)
+
+    print "Finished generating answers for dataset."
+
+    return uuid2ans
