@@ -21,13 +21,17 @@ import os
 import io
 import json
 import sys
+import pickle
 import logging
 
 import tensorflow as tf
+import numpy as np
 
 from qa_model import QAModel
 from vocab import get_glove
-from official_eval_helper import get_json_data, generate_answers, save_answer_probs
+from official_eval_helper import get_json_data, generate_answers, save_answer_probs, get_batch_generator
+
+from nltk.tokenize.moses import MosesDetokenizer
 
 
 logging.basicConfig(level=logging.INFO)
@@ -127,23 +131,24 @@ def main(unused_argv):
     # Define path for glove vecs
     FLAGS.glove_path = FLAGS.glove_path or os.path.join(DEFAULT_DATA_DIR, "glove.6B.{}d.txt".format(FLAGS.embedding_size))
 
-    # Load embedding matrix and vocab mappings
-    emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
+    if FLAGS.mode != 'loadProbs':
+        # Load embedding matrix and vocab mappings
+        emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
 
-    # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
-    train_context_path = os.path.join(FLAGS.data_dir, "train.context")
-    train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
-    train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
-    dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
-    dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
-    dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
+        # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
+        train_context_path = os.path.join(FLAGS.data_dir, "train.context")
+        train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
+        train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
+        dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
+        dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
+        dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
-    # Initialize model
-    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix)
+        # Initialize model
+        qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix)
 
-    # Some GPU settings
-    config=tf.ConfigProto()
-    config.gpu_options.allow_growth = True
+        # Some GPU settings
+        config=tf.ConfigProto()
+        config.gpu_options.allow_growth = True
 
     # Split by mode
     if FLAGS.mode == "train":
@@ -226,59 +231,103 @@ def main(unused_argv):
             # Write the uuid->answer mapping a to json file in root dir
             print "Writing predictions to %s..." % FLAGS.json_out_path
             with io.open(FLAGS.json_out_path, 'wb') as f:
-                import pickle
                 pickle.dump(answers_dict, f, protocol=2)
                 # f.write(unicode(pickle.dumps(answers_dict, ensure_ascii=False)))
                 # f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
                 print "Wrote predictions to %s" % FLAGS.json_out_path
                 
-#     elif FLAGS.mode == 'loadProbs':
-#         if FLAGS.json_in_path == "":
-#             raise Exception("For official_eval mode, you need to specify --json_in_path")
-#         if FLAGS.ckpt_load_dir == "":
-#             raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
+    elif FLAGS.mode == 'loadProbs':
+        if FLAGS.json_in_path == "":
+            raise Exception("For official_eval mode, you need to specify --json_in_path")
+        if FLAGS.ckpt_load_dir == "":
+            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
 
-#         # Read the JSON data from file
-#         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
-
-#         dictLists = []
-#         for file in os.listdir('./pickles'):
-#             prob_dict = pickle.load(open(f, 'rb'))
-#             dictLists += [prob_dict]
+        # Read the JSON data from file
+        qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
+        word2id = pickle.load(open('word2id', 'rb'))
+#         pickle.dump(word2id, open('word2id', 'wb'))
+        print 'Loaded data'
         
-# #         mainDict = []
-# #         for k in dictList[0].keys():
-            
-            
-            
-# #             # Take argmax to get start_pos and end_post, both shape (batch_size)
-# #             end_dp=np.zeros(end_dist.shape)
-# #             # start_pos = np.argmax(start_dist, axis=1)
-# #             # end_pos = np.argmax(end_dist, axis=1)
-# #             end_dp[:,-1]=end_dist[:,-1]
-# #             for i in range(len(end_dist[0])-2,-1,-1):
-# #                 end_dp[:,i]=np.amax([end_dist[:,i],end_dp[:,i+1]],axis=0)
-# #             start_pos=np.argmax(start_dist*end_dp,axis=1)
-# #             end_pos=map(lambda i:start_pos[i]+np.argmax(end_dist[i,start_pos[i]:]),range(len(end_dist)))
-# #             return start_pos, np.asarray(end_pos)
+        dictLists = []
+        for file in os.listdir('./pickles'):
+            f = os.path.join('./pickles', file)
+            print 'Loading predictions from ', f
+            prob_dict = pickle.load(open(f, 'rb'))
+            dictLists += [prob_dict]
         
-#         with tf.Session(config=config) as sess:
+        mainDict = {}
+        for probs in dictLists:
+            for k in dictLists[0].keys():
+                try:
+                    mainDict[k] = (mainDict[k][0] + np.array(probs[k][0]), mainDict[k][1] + np.array(probs[k][1]))
+                except KeyError:
+                    mainDict[k] = (np.array(probs[k][0]), np.array(probs[k][1]))
+            
+        uuid2ans = {} # maps uuid to string containing predicted answer
+        detokenizer = MosesDetokenizer()
+        
+        for k in mainDict.keys():
+            start_dist = mainDict[k][0] / (1.0 * len(dictLists))
+            end_dist = mainDict[k][1] / (1.0 * len(dictLists))
+            
+            # Take argmax to get start_pos and end_post, both shape (batch_size)
+            end_dp = np.zeros(end_dist.shape)
+            start_pos = np.argmax(start_dist)
+            end_pos = np.argmax(end_dist)
+#             end_dp[-1]=end_dist[-1]
+#             for i in range(len(end_dist)-2,-1,-1):
+#                 end_dp[i]=np.amax([end_dist[i],end_dp[i+1]])
+#             start_pos=np.argmax(start_dist*end_dp)
+#             end_pos = start_pos + np.argmax(end_dist[start_pos:])
+            
+            uuid2ans[k] = (start_pos, end_pos)
+        
+        
+        result = {}
+        data_size = len(qn_uuid_data)
+        num_batches = ((data_size-1) / FLAGS.batch_size) + 1
+        batch_num = 0
+        print "Generating answers..."
+        
+        for batch in get_batch_generator(word2id, qn_uuid_data, context_token_data, qn_token_data, FLAGS.batch_size, FLAGS.context_len, FLAGS.question_len):
 
-#             # Load model from ckpt_load_dir
-#             initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+            # For each example in the batch:
+            for ex_idx in range(FLAGS.batch_size):
 
-#             # Get a predicted answer for each example in the data
-#             # Return a mapping answers_dict from uuid to answer
-#             answers_dict = save_answer_probs(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+                # Detokenize and add to dict
+                try:    
+                    uuid = batch.uuids[ex_idx]
+                    pred_start, pred_end = uuid2ans[uuid]
 
-#             # Write the uuid->answer mapping a to json file in root dir
-#             print "Writing predictions to %s..." % FLAGS.json_out_path
-#             with io.open(FLAGS.json_out_path, 'wb') as f:
-#                 import pickle
-#                 pickle.dump(answers_dict, f, protocol=2)
-#                 # f.write(unicode(pickle.dumps(answers_dict, ensure_ascii=False)))
-#                 # f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
-#                 print "Wrote predictions to %s" % FLAGS.json_out_path
+                    # Original context tokens (no UNKs or padding) for this example
+                    context_tokens = batch.context_tokens[ex_idx] # list of strings
+
+                    # Check the predicted span is in range
+                    assert pred_start in range(len(context_tokens))
+                    assert pred_end in range(len(context_tokens))
+
+                    # Predicted answer tokens
+                    pred_ans_tokens = context_tokens[pred_start : pred_end +1] # list of strings
+
+                    result[uuid] = detokenizer.detokenize(pred_ans_tokens, return_str=True)
+
+                except IndexError:
+                    pass
+
+            batch_num += 1
+
+            if batch_num % 10 == 0:
+                print "Generated answers for %i/%i batches = %.2f%%" % (batch_num, num_batches, batch_num*100.0/num_batches)
+
+        print "Finished generating answers for dataset."
+        answers_dict = result
+
+        # Write the uuid->answer mapping a to json file in root dir
+        print "Writing predictions to %s..." % FLAGS.json_out_path
+        with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+            f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+            print "Wrote predictions to %s" % FLAGS.json_out_path
+            
 
     else:
         raise Exception("Unexpected value of FLAGS.mode: %s" % FLAGS.mode)
