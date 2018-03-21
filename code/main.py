@@ -131,24 +131,24 @@ def main(unused_argv):
     # Define path for glove vecs
     FLAGS.glove_path = FLAGS.glove_path or os.path.join(DEFAULT_DATA_DIR, "glove.6B.{}d.txt".format(FLAGS.embedding_size))
 
-    if FLAGS.mode != 'loadProbs':
-        # Load embedding matrix and vocab mappings
-        emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
+#     if FLAGS.mode != 'loadProbs':
+    # Load embedding matrix and vocab mappings
+    emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
 
-        # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
-        train_context_path = os.path.join(FLAGS.data_dir, "train.context")
-        train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
-        train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
-        dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
-        dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
-        dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
+    # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
+    train_context_path = os.path.join(FLAGS.data_dir, "train.context")
+    train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
+    train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
+    dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
+    dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
+    dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
-        # Initialize model
-        qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix)
+    # Initialize model
+    qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix)
 
-        # Some GPU settings
-        config=tf.ConfigProto()
-        config.gpu_options.allow_growth = True
+    # Some GPU settings
+    config=tf.ConfigProto()
+    config.gpu_options.allow_growth = True
 
     # Split by mode
     if FLAGS.mode == "train":
@@ -289,7 +289,7 @@ def main(unused_argv):
 
         # Read the JSON data from file
         qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
-        word2id = pickle.load(open('word2id', 'rb'))
+#         word2id = pickle.load(open('word2id', 'rb'))
 #         pickle.dump(word2id, open('word2id', 'wb'))
         print 'Loaded data'
         
