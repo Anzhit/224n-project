@@ -175,6 +175,11 @@ class Bidaf(object):
             #c2q
             attn_mask_qs = tf.expand_dims(qns_mask, 1)         # (batch_size, 1, question_len)
             _, attn_dist = masked_softmax(S, attn_mask_qs, 2)  # (batch_size, context_len, question_len)
+            
+#             _, attn_dist1 = masked_softmax(S, attn_mask_qs, 1)  # (batch_size, context_len, question_len)
+            _, attn_dist1 = masked_softmax_gen(S, attn_mask_qs, self.context_vec_size, self.qn_vec_size)  # (batch_size, context_len, question_len)
+            self.sim_mat = attn_dist
+            
             Ut = tf.matmul(attn_dist, qns)                     # (batch_size, context_len, hidden_size*2)
             Ut = tf.transpose(Ut, perm=[0, 2, 1])              # (batch_size, hidden_size*2, context_len)
                               
@@ -388,7 +393,8 @@ class BasicAttn(object):
             attn_logits = tf.matmul(keys, values_t) # shape (batch_size, num_keys, num_values)
             attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
             _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
-
+            self.sim_mat = attn_dist
+            
             # Use attention distribution to take weighted sum of values
             output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
 
@@ -543,4 +549,31 @@ def masked_softmax(logits, mask, dim):
     exp_mask = (1 - tf.cast(mask, 'float')) * (-1e30) # -large where there's padding, 0 elsewhere
     masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
     prob_dist = tf.nn.softmax(masked_logits, dim)
+    return masked_logits, prob_dist
+
+
+def masked_softmax_gen(logits, mask, context_vec_size, qn_vec_size):
+    """
+    Takes masked softmax over given dimension of logits.
+
+    Inputs:
+      logits: Numpy array. We want to take softmax over dimension dim.
+      mask: Numpy array of same shape as logits.
+        Has 1s where there's real data in logits, 0 where there's padding
+      dim: int. dimension over which to take softmax
+
+    Returns:
+      masked_logits: Numpy array same shape as logits.
+        This is the same as logits, but with 1e30 subtracted
+        (i.e. very large negative number) in the padding locations.
+      prob_dist: Numpy array same shape as logits.
+        The result of taking softmax over masked_logits in given dimension.
+        Should be 0 in padding locations.
+        Should sum to 1 over given dimension.
+    """
+    exp_mask = (1 - tf.cast(mask, 'float')) * (-1e30) # -large where there's padding, 0 elsewhere
+    masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
+    S_temp = tf.reshape(masked_logits, [-1, 450*30])
+    prob_dist = tf.nn.sigmoid(S_temp)
+    prob_dist = tf.reshape(prob_dist, [-1, 450, 30])
     return masked_logits, prob_dist

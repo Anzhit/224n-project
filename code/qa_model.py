@@ -171,8 +171,9 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         
-        attn_layer = Bidaf(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, _, blended_reps = attn_layer.build_graph(context_hiddens, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
+        attn_layer0 = Bidaf(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        _, _, blended_reps = attn_layer0.build_graph(context_hiddens, self.context_mask, question_hiddens, self.qn_mask, "bidaf") # attn_output is shape (batch_size, context_len, hidden_size*8)
+        self.bidaf = attn_layer0
         
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, self.FLAGS.num_layers, True, self.FLAGS.batch_size,self.FLAGS.dropout)
@@ -182,6 +183,7 @@ class QAModel(object):
 
         attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _,attn_output1 = attn_layer.build_graph(blended_reps, self.context_mask, blended_reps, 'b1') #, self.context_mask, question_hiddens)
+        self.selfatt1 = attn_layer
         
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 1, True, self.FLAGS.batch_size,self.FLAGS.dropout)
@@ -191,6 +193,8 @@ class QAModel(object):
         
         attn_layer2 = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         _,attn_output = attn_layer2.build_graph(blended_reps2, self.context_mask, blended_reps2, 'b2') #, self.context_mask, question_hiddens)
+        self.selfatt2 = attn_layer2
+        
         
         high = Highway(self.FLAGS.hidden_size*2)
         attn_output = high.build_graph(attn_output, attn_output1, 'h1')
@@ -351,21 +355,39 @@ class QAModel(object):
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
         return probdist_start, probdist_end
     
+    def get_prob_dists_with_bidaf(self, session, batch):
+        input_feed = {}
+        input_feed[self.context_ids] = batch.context_ids
+        input_feed[self.context_mask] = batch.context_mask
+        input_feed[self.qn_ids] = batch.qn_ids
+        input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.learning_rate] = self.lr
+        # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
+        self.FLAGS.mode='test'
+        output_feed = [self.probdist_start, self.probdist_end, self.bidaf.sim_mat, self.selfatt1.sim_mat, self.selfatt2.sim_mat]
+        [probdist_start, probdist_end, S, O1, O2] = session.run(output_feed, input_feed)
+        return probdist_start, probdist_end, S, O1, O2
+    
     def get_start_end_pos_prob(self, session, batch):
-        """
-        Run forward-pass only; get the most likely answer span.
-
-        Inputs:
-          session: TensorFlow session
-          batch: Batch object
-
-        Returns:
-          start_pos, end_pos: both numpy arrays shape (batch_size).
-            The most likely start and end positions for each example in the batch.
-        """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
         return start_dist, end_dist
+
+    def get_start_end_pos_with_bidaf(self, session, batch):
+        # Get start_dist and end_dist, both shape (batch_size, context_len)
+        start_dist, end_dist, S, O1, O2 = self.get_prob_dists_with_bidaf(session, batch)
+        
+        # Take argmax to get start_pos and end_post, both shape (batch_size)
+        end_dp=np.zeros(end_dist.shape)
+#         start_pos = np.argmax(start_dist, axis=1)
+#         end_pos = np.argmax(end_dist, axis=1)
+        end_dp[:,-1]=end_dist[:,-1]
+        for i in range(len(end_dist[0])-2,-1,-1):
+            end_dp[:,i]=np.amax([end_dist[:,i],end_dp[:,i+1]],axis=0)
+        start_pos=np.argmax(start_dist*end_dp,axis=1)
+        end_pos=map(lambda i:start_pos[i]+np.argmax(end_dist[i,start_pos[i]:]),range(len(end_dist)))
+        return start_pos, np.asarray(end_pos), S, O1, O2, start_dist, end_dist
+
 
     def get_start_end_pos(self, session, batch):
         """

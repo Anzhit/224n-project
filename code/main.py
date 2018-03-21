@@ -29,7 +29,7 @@ import numpy as np
 
 from qa_model import QAModel
 from vocab import get_glove
-from official_eval_helper import get_json_data, generate_answers, save_answer_probs, get_batch_generator
+from official_eval_helper import get_json_data, generate_answers, save_answer_probs, get_batch_generator, generate_answers_with_bidaf
 
 from nltk.tokenize.moses import MosesDetokenizer
 
@@ -183,7 +183,7 @@ def main(unused_argv):
             initialize_model(sess, qa_model, bestmodel_dir, expect_exists=True)
 
             # Show examples with F1/EM scores
-            _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=10, print_to_screen=True)
+            _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=20, print_to_screen=True)
 
 
     elif FLAGS.mode == "official_eval":
@@ -210,6 +210,51 @@ def main(unused_argv):
                 f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
                 print "Wrote predictions to %s" % FLAGS.json_out_path
     
+    elif FLAGS.mode == "official_eval_with_bidaf":
+        if FLAGS.json_in_path == "":
+            raise Exception("For official_eval mode, you need to specify --json_in_path")
+        if FLAGS.ckpt_load_dir == "":
+            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
+
+        # Read the JSON data from file
+        qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
+
+        with tf.Session(config=config) as sess:
+
+            # Load model from ckpt_load_dir
+            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+
+            # Get a predicted answer for each example in the data
+            # Return a mapping answers_dict from uuid to answer
+            answers_dict, bidaf_dict, self_dict1, self_dict2, out_dict = generate_answers_with_bidaf(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+
+            # Write the uuid->answer mapping a to json file in root dir
+            print "Writing predictions to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+                print "Wrote predictions to %s" % FLAGS.json_out_path
+
+            print "Writing sims to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path + '-bidaf', 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(bidaf_dict, ensure_ascii=False)))
+                print "Wrote sims to %s" % FLAGS.json_out_path
+
+            print "Writing self sims1 to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path + '-self1', 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(self_dict1, ensure_ascii=False)))
+                print "Wrote self sims1 to %s" % FLAGS.json_out_path
+
+            print "Writing self sims2 to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path + '-self2', 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(self_dict2, ensure_ascii=False)))
+                print "Wrote self sims2 to %s" % FLAGS.json_out_path
+                
+            print "Writing preds to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path + '-preds', 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(out_dict, ensure_ascii=False)))
+                print "Wrote preds to %s" % FLAGS.json_out_path
+
+                
     elif FLAGS.mode == 'saveProbs':
         if FLAGS.json_in_path == "":
             raise Exception("For official_eval mode, you need to specify --json_in_path")
@@ -255,34 +300,70 @@ def main(unused_argv):
             prob_dict = pickle.load(open(f, 'rb'))
             dictLists += [prob_dict]
         
-        mainDict = {}
-        for probs in dictLists:
-            for k in dictLists[0].keys():
-                try:
-                    mainDict[k] = (mainDict[k][0] + np.array(probs[k][0]), mainDict[k][1] + np.array(probs[k][1]))
-                except KeyError:
-                    mainDict[k] = (np.array(probs[k][0]), np.array(probs[k][1]))
+#         mainDict = {}
+#         stdiDict = {}
+#         for probs in dictLists:
+#             for k in dictLists[0].keys():
+#                 stdi = 1.0 / (np.std(np.array(probs[k][0])) + np.std(np.array(probs[k][1])) + 1e-2)
+#                 stdiDict[k] = stdi
+#                 try:
+#                     mainDict[k] = (mainDict[k][0] + stdi * np.array(probs[k][0]), mainDict[k][1] + stdi* np.array(probs[k][1]))
+#                 except KeyError:
+#                     mainDict[k] = (stdi* np.array(probs[k][0]), stdi*np.array(probs[k][1]))
             
         uuid2ans = {} # maps uuid to string containing predicted answer
         detokenizer = MosesDetokenizer()
         
-        for k in mainDict.keys():
-            start_dist = mainDict[k][0] / (1.0 * len(dictLists))
-            end_dist = mainDict[k][1] / (1.0 * len(dictLists))
+#         for k in mainDict.keys():
+#             start_dist = mainDict[k][0] / stdiDict[k]
+#             end_dist = mainDict[k][1] / stdiDict[k]
             
-            # Take argmax to get start_pos and end_post, both shape (batch_size)
-            end_dp = np.zeros(end_dist.shape)
-#             start_pos = np.argmax(start_dist)
-#             end_pos = np.argmax(end_dist)
-            end_dp[-1]=end_dist[-1]
-            for i in range(len(end_dist)-2,-1,-1):
-                end_dp[i]=np.amax([end_dist[i],end_dp[i+1]])
-            start_pos=np.argmax(start_dist*end_dp)
-            end_pos = start_pos + np.argmax(end_dist[start_pos:])
+#             # Take argmax to get start_pos and end_post, both shape (batch_size)
+#             end_dp = np.zeros(end_dist.shape)
+# #             start_pos = np.argmax(start_dist)
+# #             end_pos = np.argmax(end_dist)
+#             end_dp[-1]=end_dist[-1]
+#             for i in range(len(end_dist)-2,-1,-1):
+#                 end_dp[i]=np.amax([end_dist[i],end_dp[i+1]])
+#             start_pos=np.argmax(start_dist*end_dp)
+#             end_pos = start_pos + np.argmax(end_dist[start_pos:])
             
-            uuid2ans[k] = (start_pos, end_pos)
+#             uuid2ans[k] = (start_pos, end_pos)
         
-        
+        for k in dictLists[0].keys():
+            spanDict = {}
+            for probs in dictLists:
+                start_dist = np.array(probs[k][0])
+                end_dist = np.array(probs[k][1])
+
+                # Take argmax to get start_pos and end_post, both shape (batch_size)
+                end_dp = np.zeros(end_dist.shape)
+                end_dp[-1]=end_dist[-1]
+                for i in range(len(end_dist)-2,-1,-1):
+                    end_dp[i]=np.amax([end_dist[i],end_dp[i+1]])
+                start_pos=np.argmax(start_dist*end_dp)
+                end_pos = start_pos + np.argmax(end_dist[start_pos:])
+
+                try:
+                    spanDict[(start_pos, end_pos)] += [start_dist[start_pos] * end_dist[end_pos]]
+                except KeyError:
+                    spanDict[(start_pos, end_pos)] = [start_dist[start_pos] * end_dist[end_pos]]
+
+            best_span = (0, 0)
+            best_span_votes = 0
+            best_span_prob = 0
+            for span in spanDict.keys():
+                if len(spanDict[span]) > best_span_votes:
+                    best_span = span
+                    best_span_votes = len(spanDict[span])
+                    best_span_prob = max(spanDict[span])
+                elif len(spanDict[span]) == best_span_votes and best_span_prob < max(spanDict[span]):
+                    best_span = span
+                    best_span_votes = len(spanDict[span])
+                    best_span_prob = max(spanDict[span])
+
+            uuid2ans[k] = (best_span[0], best_span[1])
+
         result = {}
         data_size = len(qn_uuid_data)
         num_batches = ((data_size-1) / FLAGS.batch_size) + 1

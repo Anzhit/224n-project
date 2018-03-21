@@ -281,6 +281,62 @@ def generate_answers(session, model, word2id, qn_uuid_data, context_token_data, 
     return uuid2ans
 
 
+def generate_answers_with_bidaf(session, model, word2id, qn_uuid_data, context_token_data, qn_token_data):
+    uuid2s, uuid2o1, uuid2o2, uuid2p = {}, {}, {}, {}
+    uuid2ans = {} # maps uuid to string containing predicted answer
+    data_size = len(qn_uuid_data)
+    num_batches = ((data_size-1) / model.FLAGS.batch_size) + 1
+    batch_num = 0
+    detokenizer = MosesDetokenizer()
+
+    print "Generating answers..."
+
+    for batch in get_batch_generator(word2id, qn_uuid_data, context_token_data, qn_token_data, model.FLAGS.batch_size, model.FLAGS.context_len, model.FLAGS.question_len):
+
+        # Get the predicted spans
+        pred_start_batch, pred_end_batch, S, O1, O2, start_dist, end_dist = model.get_start_end_pos_with_bidaf(session, batch)
+
+        # Convert pred_start_batch and pred_end_batch to lists length batch_size
+        pred_start_batch = pred_start_batch.tolist()
+        pred_end_batch = pred_end_batch.tolist()
+        S = S.tolist()
+        O1 = O1.tolist()
+        O2 = O2.tolist()
+        start_dist = start_dist.tolist()
+        end_dist = end_dist.tolist()
+
+        # For each example in the batch:
+        for ex_idx, (pred_start, pred_end, suuid, ouuid1, ouuid2, start_d, end_d) in enumerate(zip(pred_start_batch, pred_end_batch, S, O1, O2, start_dist, end_dist)):
+
+            # Original context tokens (no UNKs or padding) for this example
+            context_tokens = batch.context_tokens[ex_idx] # list of strings
+
+            # Check the predicted span is in range
+            assert pred_start in range(len(context_tokens))
+            assert pred_end in range(len(context_tokens))
+
+            # Predicted answer tokens
+            pred_ans_tokens = context_tokens[pred_start : pred_end +1] # list of strings
+
+            # Detokenize and add to dict
+            uuid = batch.uuids[ex_idx]
+            uuid2ans[uuid] = detokenizer.detokenize(pred_ans_tokens, return_str=True)
+            uuid2s[uuid] = suuid
+            uuid2o1[uuid] = ouuid1
+            uuid2o2[uuid] = ouuid2
+            uuid2p[uuid] = (start_d, end_d)
+
+        batch_num += 1
+
+        if batch_num % 10 == 0:
+            print "Generated answers for %i/%i batches = %.2f%%" % (batch_num, num_batches, batch_num*100.0/num_batches)
+        break
+            
+    print "Finished generating answers for dataset."
+
+    return uuid2ans, uuid2s, uuid2o1, uuid2o2, uuid2p
+
+
 def save_answer_probs(session, model, word2id, qn_uuid_data, context_token_data, qn_token_data):
     uuid2ans = {} # maps uuid to string containing predicted answer
     data_size = len(qn_uuid_data)
