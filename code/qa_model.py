@@ -202,6 +202,7 @@ class QAModel(object):
         #high = Highway(self.FLAGS.hidden_size*2)
         #blended_reps = high.build_graph(attn_output, blended_reps, 'h2')
         blended_reps=tf.concat([blended_reps, attn_output],axis=2)
+
         if self.FLAGS.cudnn_lstm: 
             out_rnn = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, 2, True, self.FLAGS.batch_size,self.FLAGS.dropout)
         else:
